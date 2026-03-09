@@ -72,6 +72,11 @@ Commands:
   dashboard <path> [--output <p>] [--open] [--execute] [--optimize] [--proofs]
                                    Generate verification dashboard HTML
   export-proofs <path> [--output <p.lean>]  Export Lean 4 proof certificates
+  emit-llvm <path> [--output <p.ll>]  Generate LLVM IR text file
+  build-runtime [--check]          Build native C runtime library
+  compile <path> [options]         Full native compilation pipeline
+  benchmark <path> [--runs <N>] [--native]  Benchmark interpreted vs JIT vs native
+  toolchain                        Check LLVM toolchain status
   dashboard-diff <path-v1> <path-v2> [--output <p>] [--open]
                                    Diff two graph versions as HTML report
 
@@ -330,6 +335,20 @@ async function cmdReport(filePath: string, outputDir: string): Promise<ReportRes
     console.log(`Proofs:         ${m.theoremsGenerated} theorems (${m.fullyProved} proved, ${sketched >= 0 ? sketched : 0} sketched, ${m.sorryCount} obligations)`);
   } catch {
     // Proof export is optional in report
+  }
+
+  // 3.9. Native compilation info
+  try {
+    const { LLVMCodeGenerator, summarizeModule } = await import("./compiler/llvm/codegen.js");
+    const gen = new LLVMCodeGenerator({ parallel: true });
+    const mod = gen.generateModule(graph as any);
+    const llText = gen.serialize(mod);
+    const llSummary = summarizeModule(mod, llText);
+    const waves = llSummary.parallel ? `${llSummary.taskWrapperCount > 0 ? llSummary.taskWrapperCount : 1} waves parallel` : "sequential";
+    console.log(`Native:         ✓ ${graph.id}.ll (${llSummary.lineCount} lines, ${waves})`);
+    console.log(`                To build: npx tsx src/cli.ts compile ${filePath}`);
+  } catch {
+    // Native info is optional in report
   }
 
   // 4. Execute (stub mode)
@@ -2020,6 +2039,278 @@ if (__isCliMain) {
 
           console.log(`Found ${results.length} package${results.length !== 1 ? "s" : ""}.`);
           console.log(sep);
+          break;
+        }
+
+        case "emit-llvm": {
+          const { LLVMCodeGenerator, summarizeModule } = await import("./compiler/llvm/codegen.js");
+          const { writeFileSync: writeLLVM } = await import("fs");
+
+          const llvmGraph = loadGraph(cliFilePath);
+          const sep = "═══════════════════════════════════════════════════";
+
+          // Validate graph first
+          const llvmValidation = validateGraph(llvmGraph);
+          if (!llvmValidation.valid) {
+            console.error("Error: graph validation failed — cannot emit LLVM IR");
+            for (const err of llvmValidation.errors) {
+              console.error(`  - ${err}`);
+            }
+            process.exit(1);
+          }
+
+          // Parse parallel flag
+          const llvmParallel = !args.includes("--no-parallel");
+
+          const gen = new LLVMCodeGenerator({ parallel: llvmParallel });
+          const mod = gen.generateModule(llvmGraph as any);
+          const llvmText = gen.serialize(mod);
+          const summary = summarizeModule(mod, llvmText);
+          summary.version = llvmGraph.version;
+
+          const llvmOutputIdx = args.indexOf("--output");
+          const llvmOutputPath = llvmOutputIdx >= 0 && args[llvmOutputIdx + 1]
+            ? args[llvmOutputIdx + 1]
+            : `${llvmGraph.id}.ll`;
+
+          writeLLVM(llvmOutputPath, llvmText, "utf-8");
+
+          console.log(sep);
+          console.log(`AETHER LLVM Emit: ${llvmGraph.id} (v${llvmGraph.version})`);
+          console.log(sep);
+          console.log(`Nodes:          ${summary.nodeCount} → ${summary.functionCount} LLVM functions`);
+          console.log(`Structs:        ${summary.structCount}`);
+          console.log(`Contracts:      ${summary.contractsInlined} inlined, ${summary.contractsSkipped} skipped (Z3-verified)`);
+          console.log(`Confidence:     ${summary.hasConfidence ? "propagation inlined" : "none"}`);
+          console.log(`Parallel:       ${summary.parallel ? `enabled (${summary.taskWrapperCount} task wrappers)` : "disabled"}`);
+          console.log(`Runtime deps:   ${summary.runtimeDeps.join(", ")}`);
+          console.log(`Output:         ${llvmOutputPath} (${summary.lineCount} lines)`);
+          console.log(sep);
+          break;
+        }
+
+        case "build-runtime": {
+          const { buildRuntime, checkClang, getRuntimeSignatures } = await import("./compiler/llvm/runtime/build-runtime.js");
+          const sep = "═══════════════════════════════════════════════════";
+          const checkOnly = args.includes("--check");
+
+          console.log(sep);
+          console.log("AETHER Native Runtime Build");
+          console.log(sep);
+
+          const clang = checkClang();
+          console.log(`Clang:          ${clang.found ? `found (${clang.version})` : "NOT FOUND"}`);
+
+          const sigs = getRuntimeSignatures();
+          console.log(`Functions:      ${sigs.length} runtime functions defined`);
+
+          const categories = new Set(sigs.map(s => s.category));
+          console.log(`Categories:     ${[...categories].join(", ")}`);
+
+          if (checkOnly) {
+            const result = buildRuntime({ checkOnly: true });
+            console.log(`Status:         ${result.success ? "prerequisites OK" : "prerequisites MISSING"}`);
+            if (result.errors.length > 0) {
+              for (const err of result.errors) console.error(`  - ${err}`);
+            }
+          } else {
+            console.log("Building...");
+            const result = buildRuntime();
+            console.log(`Static lib:     ${result.staticLib ? "OK" : "MISSING"}`);
+            console.log(`Shared lib:     ${result.sharedLib ? "OK" : "MISSING"}`);
+            console.log(`Output dir:     ${result.outputDir}`);
+            if (result.errors.length > 0) {
+              for (const err of result.errors) console.error(`  Error: ${err}`);
+            }
+            console.log(`Result:         ${result.success ? "SUCCESS" : "FAILED"}`);
+          }
+          console.log(sep);
+          break;
+        }
+
+        case "compile": {
+          const { compileToBinary } = await import("./compiler/llvm/pipeline.js");
+          const { generateStubs, generateTestHarness } = await import("./compiler/llvm/stubs.js");
+          const { writeFileSync: writeCompile } = await import("fs");
+          const compileSep = "═══════════════════════════════════════════════════";
+
+          const compileOutputIdx = args.indexOf("--output");
+          const compileOutputDir = compileOutputIdx >= 0 && args[compileOutputIdx + 1]
+            ? args[compileOutputIdx + 1] : ".";
+          const compileNameIdx = args.indexOf("--name");
+          const compileName = compileNameIdx >= 0 && args[compileNameIdx + 1]
+            ? args[compileNameIdx + 1] : undefined;
+          const compileOptIdx = args.indexOf("--opt");
+          const compileOpt = compileOptIdx >= 0 ? parseInt(args[compileOptIdx + 1]) as 0|1|2|3 : 2;
+
+          const compileTarget = (() => {
+            const idx = args.indexOf("--target");
+            if (idx >= 0 && args[idx + 1]) return args[idx + 1] as "binary"|"object"|"llvm-ir"|"assembly";
+            return "binary" as const;
+          })();
+
+          const compileContracts = (() => {
+            const idx = args.indexOf("--contracts");
+            if (idx >= 0 && args[idx + 1]) return args[idx + 1] as "abort"|"log"|"count";
+            return "abort" as const;
+          })();
+
+          const compileResult = await compileToBinary({
+            input: cliFilePath,
+            outputDir: compileOutputDir,
+            outputName: compileName,
+            target: compileTarget,
+            optimization: compileOpt,
+            parallel: !args.includes("--no-parallel"),
+            contracts: compileContracts,
+            verbose: args.includes("--verbose"),
+          });
+
+          console.log(compileSep);
+          console.log(`AETHER Compile: ${loadGraph(cliFilePath).id}`);
+          console.log(compileSep);
+
+          const stages = compileResult.stages;
+          console.log(`  Validate:     ${stages.validate.success ? "✓" : "✗"} (${stages.validate.duration_ms}ms)`);
+          console.log(`  Type Check:   ${stages.typeCheck.success ? "✓" : "✗"} (${stages.typeCheck.duration_ms}ms)`);
+          console.log(`  Verify:       ${stages.verify.success ? "✓" : "✗"} ${stages.verify.percentage ?? 0}% (${stages.verify.duration_ms}ms)`);
+          if (stages.emitIR.outputPath) {
+            console.log(`  Emit IR:      ${stages.emitIR.success ? "✓" : "✗"} ${stages.emitIR.lines ?? 0} lines (${stages.emitIR.duration_ms}ms)`);
+          }
+          if (stages.compileObj) {
+            console.log(`  Compile Obj:  ${stages.compileObj.success ? "✓" : "✗"} (${stages.compileObj.duration_ms}ms)`);
+          }
+          if (stages.link) {
+            console.log(`  Link:         ${stages.link.success ? "✓" : "✗"} (${stages.link.duration_ms}ms)`);
+          }
+
+          console.log(`  Output:       ${compileResult.outputPath}`);
+          if (compileResult.binarySize) {
+            const kb = (compileResult.binarySize / 1024).toFixed(1);
+            console.log(`  Binary Size:  ${kb} KB`);
+          }
+          if (compileResult.errors.length > 0) {
+            for (const err of compileResult.errors) {
+              console.log(`  Error:        ${err}`);
+            }
+          }
+          console.log(`  Result:       ${compileResult.success ? "SUCCESS" : "FAILED"}`);
+
+          // Generate stubs if requested
+          if (args.includes("--stubs") || args.includes("--harness")) {
+            const compileGraph = loadGraph(cliFilePath);
+            const stubCode = generateStubs(compileGraph as any);
+            const stubName = compileName ?? compileGraph.id;
+            const stubPath = join(compileOutputDir, `${stubName.replace(/[^a-zA-Z0-9]/g, "_")}_stubs.c`);
+            writeCompile(stubPath, stubCode, "utf-8");
+            console.log(`  Stubs:        ${stubPath}`);
+
+            if (args.includes("--harness")) {
+              const harnessCode = generateTestHarness(compileGraph as any);
+              const harnessPath = join(compileOutputDir, `${stubName.replace(/[^a-zA-Z0-9]/g, "_")}_harness.c`);
+              writeCompile(harnessPath, harnessCode, "utf-8");
+              console.log(`  Harness:      ${harnessPath}`);
+            }
+          }
+
+          console.log(compileSep);
+          if (!compileResult.success) process.exit(1);
+          break;
+        }
+
+        case "benchmark": {
+          const { benchmark: runBenchmark } = await import("./compiler/llvm/benchmark.js");
+          const benchSep = "═══════════════════════════════════════════════════════";
+
+          const benchRunsIdx = args.indexOf("--runs");
+          const benchRuns = benchRunsIdx >= 0 ? parseInt(args[benchRunsIdx + 1]) : 50;
+          const benchNative = args.includes("--native");
+
+          const benchResult = await runBenchmark(cliFilePath, {
+            runs: benchRuns,
+            includeNative: benchNative,
+          });
+
+          const benchGraph = loadGraph(cliFilePath);
+          console.log(benchSep);
+          console.log(`AETHER Benchmark: ${benchGraph.id} (v${benchGraph.version})`);
+          console.log(benchSep);
+
+          const thin = "  ──────────────────────────────────────────────────";
+          console.log("  Mode          Avg       Min       Max       Runs");
+          console.log(thin);
+
+          const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - s.length));
+
+          const interpMode = benchResult.modes.interpreted;
+          console.log(`  ${pad("Interpreted", 14)}${pad(interpMode.avg_ms + "ms", 10)}${pad(interpMode.min_ms + "ms", 10)}${pad(interpMode.max_ms + "ms", 10)}${interpMode.runs}`);
+
+          const jitMode = benchResult.modes.jit;
+          console.log(`  ${pad(`JIT (Tier ${jitMode.tier})`, 14)}${pad(jitMode.avg_ms + "ms", 10)}${pad(jitMode.min_ms + "ms", 10)}${pad(jitMode.max_ms + "ms", 10)}${jitMode.runs}`);
+
+          if (benchResult.modes.native) {
+            const natMode = benchResult.modes.native;
+            console.log(`  ${pad("Native", 14)}${pad(natMode.avg_ms + "ms", 10)}${pad(natMode.min_ms + "ms", 10)}${pad(natMode.max_ms + "ms", 10)}${natMode.runs}`);
+          }
+
+          console.log(thin);
+          console.log("");
+          console.log("Speedup:");
+          console.log(`  JIT vs Interpreted:     ${benchResult.speedup.jit_vs_interpreted}`);
+          if (benchResult.speedup.native_vs_interpreted) {
+            console.log(`  Native vs Interpreted:  ${benchResult.speedup.native_vs_interpreted}`);
+          }
+          if (benchResult.speedup.native_vs_jit) {
+            console.log(`  Native vs JIT:          ${benchResult.speedup.native_vs_jit}`);
+          }
+          console.log(benchSep);
+          break;
+        }
+
+        case "toolchain": {
+          const { detectToolchain } = await import("./compiler/llvm/pipeline.js");
+          const toolchainSep = "═══════════════════════════════════════════════════════";
+
+          console.log(toolchainSep);
+          console.log("AETHER Native Toolchain Status");
+          console.log(toolchainSep);
+
+          const tc = await detectToolchain();
+
+          if (tc.llc.available) {
+            console.log(`  llc:              ✓ LLVM ${tc.llc.version ?? "unknown"} (${tc.llc.path ?? "on PATH"})`);
+          } else {
+            console.log("  llc:              ✗ Not found");
+          }
+
+          if (tc.clang.available) {
+            console.log(`  clang:            ✓ clang ${tc.clang.version ?? "unknown"} (${tc.clang.path ?? "on PATH"})`);
+          } else {
+            console.log("  clang:            ✗ Not found");
+          }
+
+          if (tc.runtime.available) {
+            console.log(`  Runtime library:  ✓ ${tc.runtime.path}`);
+          } else {
+            console.log("  Runtime library:  ✗ Not found");
+          }
+
+          console.log(`  Threading:        ✓ pthreads available`);
+
+          if (!tc.llc.available || !tc.clang.available) {
+            console.log("");
+            console.log("  Install LLVM: https://releases.llvm.org/download.html");
+            if (process.platform === "darwin") {
+              console.log("  Or: brew install llvm");
+            } else if (process.platform === "linux") {
+              console.log("  Or: apt install llvm clang");
+            }
+          }
+
+          const ready = tc.llc.available && tc.clang.available;
+          console.log(toolchainSep);
+          console.log(`  Status: ${ready ? "Ready for native compilation" : "Toolchain incomplete"}`);
+          console.log(toolchainSep);
           break;
         }
 
