@@ -99,7 +99,22 @@ aether/
 - Do not use `any` types or untyped escape hatches — use supervised blocks instead
 - Do not build features that require loading the full graph into context
 
-## Phase 0 Priorities (Current)
+## IR Generation
+
+When asked to generate an AETHER program:
+1. Read prompts/generate-ir.md for the full generation prompt
+2. Generate valid AETHER-IR JSON conforming to src/ir/schema.json
+3. Validate with: npx tsx src/cli.ts generate <path>
+4. Fix any reported errors — every error message tells you exactly what to fix
+5. Re-validate until STATUS: ACCEPTED
+
+Common mistakes to avoid:
+- Forgetting recovery on effectful nodes
+- Forgetting adversarial_check when confidence < 0.85
+- Edges pointing to wrong port direction (from must be out, to must be in)
+- Trailing commas in JSON arrays/objects
+
+## Phase 0 Priorities (Complete)
 
 1. Define AETHER-IR JSON schema
 2. Build 3 reference programs by hand in IR format

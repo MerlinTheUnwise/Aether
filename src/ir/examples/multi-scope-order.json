@@ -1,0 +1,197 @@
+{
+  "id": "multi_scope_order",
+  "version": 1,
+  "effects": ["database.read", "database.write", "payment_gateway.write", "shipping.write", "email"],
+  "metadata": {
+    "description": "Order processing pipeline with context-scoped subgraphs and boundary contracts"
+  },
+  "nodes": [
+    {
+      "id": "validate_order",
+      "in": {
+        "order_items": {
+          "type": "List<OrderItem>",
+          "domain": "order"
+        },
+        "customer_id": {
+          "type": "String",
+          "domain": "customer",
+          "sensitivity": "pii"
+        }
+      },
+      "out": {
+        "validated_order": {
+          "type": "Order",
+          "domain": "order"
+        },
+        "total_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        }
+      },
+      "contract": {
+        "post": ["total_amount > 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "check_inventory",
+      "in": {
+        "validated_order": {
+          "type": "Order",
+          "domain": "order"
+        }
+      },
+      "out": {
+        "available": {
+          "type": "Bool"
+        },
+        "reserved_items": {
+          "type": "List<OrderItem>",
+          "domain": "inventory"
+        }
+      },
+      "contract": {
+        "post": ["available == true"]
+      },
+      "effects": ["database.read", "database.write"],
+      "recovery": {
+        "out_of_stock": {
+          "action": "respond",
+          "params": { "status": 409, "body": "items out of stock" }
+        },
+        "db_timeout": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        }
+      }
+    },
+    {
+      "id": "process_payment",
+      "in": {
+        "total_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        },
+        "customer_id": {
+          "type": "String",
+          "domain": "customer",
+          "sensitivity": "pii"
+        },
+        "available": {
+          "type": "Bool",
+          "constraint": "== true"
+        }
+      },
+      "out": {
+        "transaction_id": {
+          "type": "String",
+          "domain": "payment"
+        },
+        "payment_status": {
+          "type": "String",
+          "domain": "payment"
+        }
+      },
+      "contract": {
+        "pre": ["total_amount > 0", "available == true"],
+        "post": ["payment_status == completed", "transaction_id.length > 0"]
+      },
+      "effects": ["payment_gateway.write"],
+      "recovery": {
+        "payment_declined": {
+          "action": "respond",
+          "params": { "status": 402, "body": "payment declined" }
+        },
+        "gateway_error": {
+          "action": "retry",
+          "params": { "count": 2, "backoff": "exponential" }
+        }
+      }
+    },
+    {
+      "id": "create_shipment",
+      "in": {
+        "reserved_items": {
+          "type": "List<OrderItem>",
+          "domain": "inventory"
+        },
+        "customer_id": {
+          "type": "String",
+          "domain": "customer",
+          "sensitivity": "pii"
+        },
+        "transaction_id": {
+          "type": "String",
+          "domain": "payment"
+        }
+      },
+      "out": {
+        "tracking_number": {
+          "type": "String",
+          "domain": "fulfillment"
+        },
+        "estimated_delivery": {
+          "type": "String",
+          "domain": "fulfillment"
+        }
+      },
+      "contract": {
+        "pre": ["transaction_id.length > 0"],
+        "post": ["tracking_number.length > 0"]
+      },
+      "effects": ["shipping.write", "database.write"],
+      "recovery": {
+        "shipping_unavailable": {
+          "action": "escalate",
+          "params": { "message": "shipping service unavailable", "preserve_context": true }
+        }
+      }
+    },
+    {
+      "id": "send_confirmation",
+      "in": {
+        "customer_id": {
+          "type": "String",
+          "domain": "customer",
+          "sensitivity": "pii"
+        },
+        "transaction_id": {
+          "type": "String",
+          "domain": "payment"
+        },
+        "tracking_number": {
+          "type": "String",
+          "domain": "fulfillment"
+        }
+      },
+      "out": {
+        "notification_sent": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "post": ["notification_sent == true"]
+      },
+      "effects": ["email"],
+      "recovery": {
+        "email_failed": {
+          "action": "report",
+          "params": { "channel": "notification-failures" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "validate_order.validated_order", "to": "check_inventory.validated_order" },
+    { "from": "validate_order.total_amount", "to": "process_payment.total_amount" },
+    { "from": "check_inventory.available", "to": "process_payment.available" },
+    { "from": "check_inventory.reserved_items", "to": "create_shipment.reserved_items" },
+    { "from": "process_payment.transaction_id", "to": "create_shipment.transaction_id" },
+    { "from": "process_payment.transaction_id", "to": "send_confirmation.transaction_id" },
+    { "from": "create_shipment.tracking_number", "to": "send_confirmation.tracking_number" }
+  ]
+}

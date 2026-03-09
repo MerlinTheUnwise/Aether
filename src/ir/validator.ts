@@ -24,9 +24,11 @@ export interface ValidationResult {
   errors: string[];
   warnings: string[];
   supervisedCount: number;
+  holeCount: number;
+  completeness: number;
 }
 
-interface TypeAnnotation {
+export interface TypeAnnotation {
   type: string;
   domain?: string;
   unit?: string;
@@ -37,7 +39,7 @@ interface TypeAnnotation {
   constraint?: string;
 }
 
-interface Contract {
+export interface Contract {
   pre?: string[];
   post?: string[];
   invariants?: string[];
@@ -57,7 +59,7 @@ interface SupervisedBlock {
   review_status?: "pending" | "approved" | "rejected";
 }
 
-interface AetherNode {
+export interface AetherNode {
   id: string;
   in: Record<string, TypeAnnotation>;
   out: Record<string, TypeAnnotation>;
@@ -70,17 +72,29 @@ interface AetherNode {
   supervised?: SupervisedBlock;
 }
 
-interface AetherEdge {
+export interface AetherHole {
+  id: string;
+  hole: true;
+  must_satisfy: {
+    in: Record<string, TypeAnnotation>;
+    out: Record<string, TypeAnnotation>;
+    effects?: string[];
+    contract?: Contract;
+  };
+}
+
+export interface AetherEdge {
   from: string; // "node_id.port_name"
   to: string;   // "node_id.port_name"
 }
 
-interface AetherGraph {
+export interface AetherGraph {
   id: string;
   version: number;
   effects: string[];
+  partial?: boolean;
   sla?: { latency_ms?: number; availability?: number };
-  nodes: AetherNode[];
+  nodes: (AetherNode | AetherHole)[];
   edges: AetherEdge[];
   metadata?: {
     description?: string;
@@ -122,6 +136,12 @@ const AjvClass: AjvCtor =
     : ((ajvModule as { default: AjvCtor }).default ?? (ajvModule as unknown as AjvCtor));
 const ajv: AjvInstance = new AjvClass({ allErrors: true });
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function isHole(node: AetherNode | AetherHole): node is AetherHole {
+  return "hole" in node && (node as AetherHole).hole === true;
+}
+
 // ─── Validation logic ─────────────────────────────────────────────────────────
 
 function parseEdgeRef(ref: string): { nodeId: string; portName: string } | null {
@@ -130,7 +150,7 @@ function parseEdgeRef(ref: string): { nodeId: string; portName: string } | null 
   return { nodeId: ref.slice(0, dot), portName: ref.slice(dot + 1) };
 }
 
-function detectCycle(nodes: AetherNode[], edges: AetherEdge[]): string | null {
+function detectCycle(nodes: (AetherNode | AetherHole)[], edges: AetherEdge[]): string | null {
   // Build adjacency list: nodeId → set of nodeIds it points to
   const nodeIds = new Set(nodes.map((n) => n.id));
   const adj = new Map<string, Set<string>>();
@@ -183,6 +203,7 @@ export function validateGraph(graph: unknown): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   let supervisedCount = 0;
+  let holeCount = 0;
 
   // ── Rule 1: JSON Schema validation ──────────────────────────────────────────
   const validate = ajv.compile(schema);
@@ -193,18 +214,20 @@ export function validateGraph(graph: unknown): ValidationResult {
       errors.push(`Schema: ${path} — ${err.message ?? "unknown error"}`);
     }
     // Cannot proceed with structural checks on invalid shape
-    return { valid: false, errors, warnings, supervisedCount };
+    return { valid: false, errors, warnings, supervisedCount, holeCount: 0, completeness: 0 };
   }
 
   // Safe cast after schema validation
   const g = graph as AetherGraph;
+  const isPartial = g.partial === true;
 
   // ── Rule 2: DAG check ────────────────────────────────────────────────────────
   const cycleErr = detectCycle(g.nodes, g.edges);
   if (cycleErr) errors.push(cycleErr);
 
   // ── Build lookup maps ────────────────────────────────────────────────────────
-  const nodeMap = new Map<string, AetherNode>();
+  const nodeMap = new Map<string, AetherNode | AetherHole>();
+  const holeSet = new Set<string>();
   const seenNodeIds = new Set<string>();
   for (const node of g.nodes) {
     if (seenNodeIds.has(node.id)) {
@@ -212,6 +235,15 @@ export function validateGraph(graph: unknown): ValidationResult {
     }
     seenNodeIds.add(node.id);
     nodeMap.set(node.id, node);
+    if (isHole(node)) {
+      holeCount++;
+      holeSet.add(node.id);
+    }
+  }
+
+  // ── Hole check: holes only allowed in partial graphs ────────────────────────
+  if (!isPartial && holeCount > 0) {
+    errors.push("partial graph contains holes but partial flag is false");
   }
 
   // ── Rule 3 & 7: Edge reference check + port direction check ─────────────────
@@ -225,6 +257,15 @@ export function validateGraph(graph: unknown): ValidationResult {
       const fromNode = nodeMap.get(from.nodeId);
       if (!fromNode) {
         errors.push(`Edge from="${edge.from}" references unknown node "${from.nodeId}"`);
+      } else if (isHole(fromNode)) {
+        // Edge referencing a hole's port — valid in partial, check port exists on must_satisfy
+        if (!(from.portName in fromNode.must_satisfy.out)) {
+          if (isPartial) {
+            warnings.push(`Edge from="${edge.from}" references unknown port "${from.portName}" on hole "${from.nodeId}"`);
+          } else {
+            errors.push(`Edge from="${edge.from}" references unknown port "${from.portName}" on hole "${from.nodeId}"`);
+          }
+        }
       } else {
         // Rule 7: from must be an OUT port
         if (!(from.portName in fromNode.out)) {
@@ -247,6 +288,15 @@ export function validateGraph(graph: unknown): ValidationResult {
       const toNode = nodeMap.get(to.nodeId);
       if (!toNode) {
         errors.push(`Edge to="${edge.to}" references unknown node "${to.nodeId}"`);
+      } else if (isHole(toNode)) {
+        // Edge referencing a hole's port — valid in partial, check port exists on must_satisfy
+        if (!(to.portName in toNode.must_satisfy.in)) {
+          if (isPartial) {
+            warnings.push(`Edge to="${edge.to}" references unknown port "${to.portName}" on hole "${to.nodeId}"`);
+          } else {
+            errors.push(`Edge to="${edge.to}" references unknown port "${to.portName}" on hole "${to.nodeId}"`);
+          }
+        }
       } else {
         // Rule 7: to must be an IN port
         if (!(to.portName in toNode.in)) {
@@ -264,8 +314,10 @@ export function validateGraph(graph: unknown): ValidationResult {
     }
   }
 
-  // ── Rules 4, 5, 6 per node ───────────────────────────────────────────────────
+  // ── Rules 4, 5, 6 per node (skip holes) ──────────────────────────────────────
   for (const node of g.nodes) {
+    if (isHole(node)) continue; // Holes skip all content validation
+
     // Rule 5: confidence < 0.85 requires adversarial_check
     if (node.confidence !== undefined && node.confidence < 0.85) {
       if (!node.adversarial_check || node.adversarial_check.break_if.length === 0) {
@@ -292,11 +344,16 @@ export function validateGraph(graph: unknown): ValidationResult {
     }
   }
 
+  const verifiedNodes = g.nodes.length - holeCount;
+  const completeness = g.nodes.length > 0 ? verifiedNodes / g.nodes.length : 1;
+
   return {
     valid: errors.length === 0,
     errors,
     warnings,
     supervisedCount,
+    holeCount,
+    completeness,
   };
 }
 

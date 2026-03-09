@@ -106,8 +106,10 @@ type ParsedExpr =
   | { kind: "var"; name: string }
   | { kind: "num"; value: number }
   | { kind: "bool"; value: boolean }
+  | { kind: "str"; value: string }
   | { kind: "compare"; op: string; left: ParsedExpr; right: ParsedExpr }
   | { kind: "logic"; op: "and" | "or"; left: ParsedExpr; right: ParsedExpr }
+  | { kind: "implies"; left: ParsedExpr; right: ParsedExpr }
   | { kind: "not"; expr: ParsedExpr }
   | { kind: "prop"; object: string; property: string }
   | { kind: "unsupported"; raw: string };
@@ -126,6 +128,7 @@ function tokenize(expr: string): string[] {
     if (expr.slice(i, i + 2) === "==") { tokens.push("=="); i += 2; continue; }
     if (expr.slice(i, i + 2) === "&&") { tokens.push("&&"); i += 2; continue; }
     if (expr.slice(i, i + 2) === "||") { tokens.push("||"); i += 2; continue; }
+    if (expr.slice(i, i + 2) === "->") { tokens.push("→"); i += 2; continue; }
 
     // Unicode operators
     if (expr[i] === "∧") { tokens.push("∧"); i++; continue; }
@@ -139,9 +142,21 @@ function tokenize(expr: string): string[] {
     if (expr[i] === "∩") { tokens.push("∩"); i++; continue; }
     if (expr[i] === "⊆") { tokens.push("⊆"); i++; continue; }
     if (expr[i] === "∀") { tokens.push("∀"); i++; continue; }
+    if (expr[i] === "→") { tokens.push("→"); i++; continue; }
+    if (expr[i] === "⟹") { tokens.push("→"); i++; continue; }
 
     // Single-char operators
     if ("<>=!+*()-:,".includes(expr[i])) { tokens.push(expr[i]); i++; continue; }
+
+    // String literals
+    if (expr[i] === '"') {
+      let str = '"';
+      i++;
+      while (i < expr.length && expr[i] !== '"') { str += expr[i]; i++; }
+      if (i < expr.length) { str += '"'; i++; }
+      tokens.push(str);
+      continue;
+    }
 
     // Numbers
     if (/\d/.test(expr[i]) || (expr[i] === "-" && i + 1 < expr.length && /\d/.test(expr[i + 1]))) {
@@ -200,13 +215,23 @@ function parseExpression(expr: string): ParsedExpr {
   if (tokens.length === 0) return { kind: "unsupported", raw: trimmed };
 
   try {
-    return parseOr(tokens, { pos: 0 });
+    return parseImplication(tokens, { pos: 0 });
   } catch {
     return { kind: "unsupported", raw: trimmed };
   }
 }
 
 interface ParseState { pos: number }
+
+function parseImplication(tokens: string[], state: ParseState): ParsedExpr {
+  let left = parseOr(tokens, state);
+  while (state.pos < tokens.length && tokens[state.pos] === "→") {
+    state.pos++;
+    const right = parseOr(tokens, state);
+    left = { kind: "implies", left, right };
+  }
+  return left;
+}
 
 function parseOr(tokens: string[], state: ParseState): ParsedExpr {
   let left = parseAnd(tokens, state);
@@ -239,14 +264,26 @@ function parseNot(tokens: string[], state: ParseState): ParsedExpr {
 
 function parseComparison(tokens: string[], state: ParseState): ParsedExpr {
   const left = parseAtom(tokens, state);
-  if (state.pos < tokens.length) {
-    const op = tokens[state.pos];
-    if (["<", ">", "<=", ">=", "==", "!=", "≠", "≤", "≥", "="].includes(op)) {
+  const compOps = ["<", ">", "<=", ">=", "==", "!=", "≠", "≤", "≥", "="];
+
+  if (state.pos < tokens.length && compOps.includes(tokens[state.pos])) {
+    const op1 = tokens[state.pos];
+    state.pos++;
+    const middle = parseAtom(tokens, state);
+    const normalizedOp1 = op1 === "≠" ? "!=" : op1 === "≤" ? "<=" : op1 === "≥" ? ">=" : op1;
+    const firstCmp: ParsedExpr = { kind: "compare", op: normalizedOp1, left, right: middle };
+
+    // Check for chained comparison: a ≤ b ≤ c → (a ≤ b) ∧ (b ≤ c)
+    if (state.pos < tokens.length && compOps.includes(tokens[state.pos])) {
+      const op2 = tokens[state.pos];
       state.pos++;
       const right = parseAtom(tokens, state);
-      const normalizedOp = op === "≠" ? "!=" : op === "≤" ? "<=" : op === "≥" ? ">=" : op;
-      return { kind: "compare", op: normalizedOp, left, right };
+      const normalizedOp2 = op2 === "≠" ? "!=" : op2 === "≤" ? "<=" : op2 === "≥" ? ">=" : op2;
+      const secondCmp: ParsedExpr = { kind: "compare", op: normalizedOp2, left: middle, right };
+      return { kind: "logic", op: "and", left: firstCmp, right: secondCmp };
     }
+
+    return firstCmp;
   }
   return left;
 }
@@ -272,6 +309,12 @@ function parseAtom(tokens: string[], state: ParseState): ParsedExpr {
   if (token === "true") { state.pos++; return { kind: "bool", value: true }; }
   if (token === "false") { state.pos++; return { kind: "bool", value: false }; }
 
+  // String literals
+  if (token.startsWith('"') && token.endsWith('"')) {
+    state.pos++;
+    return { kind: "str", value: token.slice(1, -1) };
+  }
+
   // Number literals
   if (/^-?\d+(\.\d+)?$/.test(token)) {
     state.pos++;
@@ -293,8 +336,8 @@ function parseAtom(tokens: string[], state: ParseState): ParsedExpr {
 
 // ─── Z3 Expression Builder ───────────────────────────────────────────────────
 
-function collectVariables(expr: ParsedExpr): Map<string, "int" | "real" | "bool" | "unknown"> {
-  const vars = new Map<string, "int" | "real" | "bool" | "unknown">();
+function collectVariables(expr: ParsedExpr): Map<string, "int" | "real" | "bool" | "string" | "unknown"> {
+  const vars = new Map<string, "int" | "real" | "bool" | "string" | "unknown">();
 
   function walk(e: ParsedExpr): void {
     switch (e.kind) {
@@ -303,7 +346,12 @@ function collectVariables(expr: ParsedExpr): Map<string, "int" | "real" | "bool"
         break;
       case "prop": {
         const name = `${e.object}_${e.property}`;
-        if (!vars.has(name)) vars.set(name, "unknown");
+        // list.length → integer
+        if (e.property === "length") {
+          vars.set(name, "int");
+        } else if (!vars.has(name)) {
+          vars.set(name, "unknown");
+        }
         break;
       }
       case "compare":
@@ -311,8 +359,15 @@ function collectVariables(expr: ParsedExpr): Map<string, "int" | "real" | "bool"
         walk(e.right);
         // Infer types from comparison context
         inferFromComparison(e.left, e.right, vars);
+        // Infer string type from string comparisons
+        if (e.left.kind === "str" && e.right.kind === "var") vars.set(e.right.name, "unknown");
+        if (e.right.kind === "str" && e.left.kind === "var") vars.set(e.left.name, "unknown");
         break;
       case "logic":
+        walk(e.left);
+        walk(e.right);
+        break;
+      case "implies":
         walk(e.left);
         walk(e.right);
         break;
@@ -329,7 +384,7 @@ function collectVariables(expr: ParsedExpr): Map<string, "int" | "real" | "bool"
 function inferFromComparison(
   left: ParsedExpr,
   right: ParsedExpr,
-  vars: Map<string, "int" | "real" | "bool" | "unknown">
+  vars: Map<string, "int" | "real" | "bool" | "string" | "unknown">
 ): void {
   // If one side is a number, the other should be numeric
   const leftName = left.kind === "var" ? left.name : left.kind === "prop" ? `${left.object}_${left.property}` : null;
@@ -346,6 +401,12 @@ function inferFromComparison(
   }
   if (rightName && left.kind === "bool") {
     vars.set(rightName, "bool");
+  }
+  if (leftName && right.kind === "str") {
+    vars.set(leftName, "string");
+  }
+  if (rightName && left.kind === "str") {
+    vars.set(rightName, "string");
   }
 }
 
@@ -364,6 +425,13 @@ function buildZ3Expr(
     }
     case "bool":
       return expr.value ? ctx.Bool.val(true) : ctx.Bool.val(false);
+    case "str":
+      // Create a string constant for Z3 comparison
+      try {
+        return ctx.String.val(expr.value);
+      } catch {
+        return null;
+      }
     case "var": {
       const v = varMap.get(expr.name);
       if (!v) return null;
@@ -379,15 +447,20 @@ function buildZ3Expr(
       const l = buildZ3Expr(expr.left, ctx, varMap);
       const r = buildZ3Expr(expr.right, ctx, varMap);
       if (!l || !r) return null;
-      switch (expr.op) {
-        case "<": return ctx.LT(l, r);
-        case ">": return ctx.GT(l, r);
-        case "<=": return ctx.LE(l, r);
-        case ">=": return ctx.GE(l, r);
-        case "==":
-        case "=": return ctx.Eq(l, r);
-        case "!=": return ctx.Not(ctx.Eq(l, r));
-        default: return null;
+      try {
+        switch (expr.op) {
+          case "<": return ctx.LT(l, r);
+          case ">": return ctx.GT(l, r);
+          case "<=": return ctx.LE(l, r);
+          case ">=": return ctx.GE(l, r);
+          case "==":
+          case "=": return ctx.Eq(l, r);
+          case "!=": return ctx.Not(ctx.Eq(l, r));
+          default: return null;
+        }
+      } catch {
+        // Sort mismatch (e.g., Int vs String) — graceful degradation
+        return null;
       }
     }
     case "logic": {
@@ -395,6 +468,12 @@ function buildZ3Expr(
       const r = buildZ3Expr(expr.right, ctx, varMap);
       if (!l || !r) return null;
       return expr.op === "and" ? ctx.And(l, r) : ctx.Or(l, r);
+    }
+    case "implies": {
+      const l = buildZ3Expr(expr.left, ctx, varMap);
+      const r = buildZ3Expr(expr.right, ctx, varMap);
+      if (!l || !r) return null;
+      return ctx.Implies(l, r);
     }
     case "not": {
       const inner = buildZ3Expr(expr.expr, ctx, varMap);
@@ -407,7 +486,7 @@ function buildZ3Expr(
 }
 
 function createZ3Variables(
-  vars: Map<string, "int" | "real" | "bool" | "unknown">,
+  vars: Map<string, "int" | "real" | "bool" | "string" | "unknown">,
   nodeAnnotations: Map<string, TypeAnnotation>,
   ctx: Z3Context
 ): Map<string, unknown> {
@@ -422,6 +501,7 @@ function createZ3Variables(
       if (annotation.type === "Int") type = "int";
       else if (annotation.type === "Float64" || annotation.type === "Float32") type = "real";
       else if (annotation.type === "Bool") type = "bool";
+      else if (annotation.type === "String") type = "string";
     }
 
     // Default unknown to int
@@ -431,6 +511,9 @@ function createZ3Variables(
       case "int": varMap.set(name, ctx.Int.const(name)); break;
       case "real": varMap.set(name, ctx.Real.const(name)); break;
       case "bool": varMap.set(name, ctx.Bool.const(name)); break;
+      case "string":
+        try { varMap.set(name, ctx.String.const(name)); } catch { varMap.set(name, ctx.Int.const(name)); }
+        break;
     }
   }
 

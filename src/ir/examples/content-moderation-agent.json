@@ -1,0 +1,232 @@
+{
+  "id": "content_moderation_agent",
+  "version": 1,
+  "effects": ["ml_model.infer", "database.read", "database.write"],
+  "metadata": {
+    "description": "AI content moderation agent with confidence cascading, adversarial self-checks, and human-in-the-loop",
+    "safety_level": "high",
+    "human_oversight": {
+      "required_when": "confidence < 0.9"
+    }
+  },
+  "nodes": [
+    {
+      "id": "classify_content",
+      "in": {
+        "content": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "content_type": {
+          "type": "String",
+          "domain": "moderation"
+        }
+      },
+      "out": {
+        "category": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "classification_confidence": {
+          "type": "Float64",
+          "range": [0.0, 1.0]
+        }
+      },
+      "contract": {
+        "post": ["classification_confidence >= 0", "classification_confidence <= 1"]
+      },
+      "confidence": 0.80,
+      "adversarial_check": {
+        "break_if": [
+          "classification_confidence < 0",
+          "classification_confidence > 1"
+        ]
+      },
+      "effects": ["ml_model.infer"],
+      "recovery": {
+        "model_error": {
+          "action": "escalate",
+          "params": { "message": "classification model failed", "preserve_context": true }
+        },
+        "timeout": {
+          "action": "retry",
+          "params": { "count": 2, "backoff": "exponential" }
+        }
+      }
+    },
+    {
+      "id": "assess_severity",
+      "in": {
+        "category": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "classification_confidence": {
+          "type": "Float64",
+          "range": [0.0, 1.0]
+        },
+        "content": {
+          "type": "String",
+          "domain": "moderation"
+        }
+      },
+      "out": {
+        "severity": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "combined_confidence": {
+          "type": "Float64",
+          "range": [0.0, 1.0]
+        }
+      },
+      "contract": {
+        "post": ["combined_confidence >= 0", "combined_confidence <= 1"]
+      },
+      "confidence": 0.75,
+      "adversarial_check": {
+        "break_if": [
+          "combined_confidence > classification_confidence",
+          "combined_confidence < 0"
+        ]
+      },
+      "effects": ["ml_model.infer"],
+      "recovery": {
+        "assessment_failed": {
+          "action": "escalate",
+          "params": { "message": "severity assessment failed" }
+        }
+      }
+    },
+    {
+      "id": "decide_action",
+      "in": {
+        "severity": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "combined_confidence": {
+          "type": "Float64",
+          "range": [0.0, 1.0]
+        },
+        "category": {
+          "type": "String",
+          "domain": "moderation"
+        }
+      },
+      "out": {
+        "moderation_action": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "requires_human_review": {
+          "type": "Bool"
+        },
+        "decision_confidence": {
+          "type": "Float64",
+          "range": [0.0, 1.0]
+        }
+      },
+      "contract": {
+        "post": ["decision_confidence >= 0", "decision_confidence <= 1"],
+        "invariants": ["never(moderation_action == auto_remove ∧ combined_confidence < 0.9)", "never(moderation_action == ban_user ∧ requires_human_review == false)"]
+      },
+      "confidence": 0.70,
+      "adversarial_check": {
+        "break_if": [
+          "decision_confidence > combined_confidence",
+          "decision_confidence < 0"
+        ]
+      },
+      "effects": ["database.read"],
+      "recovery": {
+        "decision_failed": {
+          "action": "escalate",
+          "params": { "message": "moderation decision could not be made", "preserve_context": true }
+        }
+      }
+    },
+    {
+      "id": "execute_moderation",
+      "in": {
+        "moderation_action": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "requires_human_review": {
+          "type": "Bool"
+        },
+        "decision_confidence": {
+          "type": "Float64",
+          "range": [0.0, 1.0],
+          "constraint": "> 0.9"
+        }
+      },
+      "out": {
+        "action_taken": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "success": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "pre": ["decision_confidence > 0"],
+        "post": ["success == true"]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "execution_failed": {
+          "action": "escalate",
+          "params": { "message": "moderation action execution failed" }
+        }
+      }
+    },
+    {
+      "id": "log_decision",
+      "in": {
+        "action_taken": {
+          "type": "String",
+          "domain": "moderation"
+        },
+        "decision_confidence": {
+          "type": "Float64",
+          "range": [0.0, 1.0]
+        },
+        "category": {
+          "type": "String",
+          "domain": "moderation"
+        }
+      },
+      "out": {
+        "logged": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "post": ["logged == true"]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "log_failed": {
+          "action": "report",
+          "params": { "channel": "moderation-audit" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "classify_content.category", "to": "assess_severity.category" },
+    { "from": "classify_content.classification_confidence", "to": "assess_severity.classification_confidence" },
+    { "from": "assess_severity.severity", "to": "decide_action.severity" },
+    { "from": "assess_severity.combined_confidence", "to": "decide_action.combined_confidence" },
+    { "from": "classify_content.category", "to": "decide_action.category" },
+    { "from": "decide_action.moderation_action", "to": "execute_moderation.moderation_action" },
+    { "from": "decide_action.requires_human_review", "to": "execute_moderation.requires_human_review" },
+    { "from": "decide_action.decision_confidence", "to": "execute_moderation.decision_confidence" },
+    { "from": "execute_moderation.action_taken", "to": "log_decision.action_taken" },
+    { "from": "decide_action.decision_confidence", "to": "log_decision.decision_confidence" },
+    { "from": "classify_content.category", "to": "log_decision.category" }
+  ]
+}

@@ -37,11 +37,21 @@
         }
       }
     },
+    "partial": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, graph may contain holes and dangling edges are warnings"
+    },
     "nodes": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/definitions/AetherNode" },
-      "description": "All computation nodes in the graph"
+      "items": {
+        "oneOf": [
+          { "$ref": "#/definitions/AetherNode" },
+          { "$ref": "#/definitions/AetherHole" }
+        ]
+      },
+      "description": "All computation nodes (and holes) in the graph"
     },
     "edges": {
       "type": "array",
@@ -230,6 +240,48 @@
         "supervised": {
           "$ref": "#/definitions/SupervisedBlock",
           "description": "Marks this node as explicitly unverified, tracked in verification score"
+        }
+      }
+    },
+    "AetherHole": {
+      "type": "object",
+      "required": ["id", "hole", "must_satisfy"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique hole identifier within this graph"
+        },
+        "hole": {
+          "const": true,
+          "description": "Marker that this is a hole, not a concrete node"
+        },
+        "must_satisfy": {
+          "type": "object",
+          "required": ["in", "out"],
+          "additionalProperties": false,
+          "properties": {
+            "in": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" },
+              "description": "Required input ports"
+            },
+            "out": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" },
+              "description": "Required output ports"
+            },
+            "effects": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Required effects"
+            },
+            "contract": {
+              "$ref": "#/definitions/Contract",
+              "description": "Required contract — node's contracts must imply these"
+            }
+          }
         }
       }
     },

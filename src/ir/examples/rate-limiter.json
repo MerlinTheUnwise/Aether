@@ -1,0 +1,147 @@
+{
+  "id": "rate_limiter",
+  "version": 1,
+  "effects": ["database.read", "database.write"],
+  "nodes": [
+    {
+      "id": "check_quota",
+      "in": {
+        "client_id": {
+          "type": "String",
+          "domain": "rate_limiting"
+        },
+        "window_seconds": {
+          "type": "Int",
+          "dimension": "time",
+          "unit": "seconds"
+        },
+        "max_requests": {
+          "type": "Int",
+          "range": [1, 10000]
+        }
+      },
+      "out": {
+        "current_count": {
+          "type": "Int"
+        },
+        "within_limit": {
+          "type": "Bool"
+        },
+        "remaining": {
+          "type": "Int"
+        }
+      },
+      "contract": {
+        "post": ["current_count >= 0", "remaining >= 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "increment_counter",
+      "in": {
+        "client_id": {
+          "type": "String",
+          "domain": "rate_limiting"
+        },
+        "within_limit": {
+          "type": "Bool",
+          "constraint": "== true"
+        }
+      },
+      "out": {
+        "new_count": {
+          "type": "Int"
+        },
+        "success": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "pre": ["within_limit == true"],
+        "post": ["new_count > 0", "success == true"]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "db_error": {
+          "action": "retry",
+          "params": { "count": 2, "backoff": "linear" }
+        }
+      }
+    },
+    {
+      "id": "enforce_limit",
+      "in": {
+        "within_limit": {
+          "type": "Bool"
+        },
+        "remaining": {
+          "type": "Int"
+        },
+        "client_id": {
+          "type": "String",
+          "domain": "rate_limiting"
+        }
+      },
+      "out": {
+        "allowed": {
+          "type": "Bool"
+        },
+        "retry_after_seconds": {
+          "type": "Int",
+          "dimension": "time",
+          "unit": "seconds"
+        }
+      },
+      "contract": {
+        "post": ["retry_after_seconds >= 0"]
+      },
+      "effects": ["database.read"],
+      "recovery": {
+        "rate_exceeded": {
+          "action": "respond",
+          "params": { "status": 429, "body": "rate limited" }
+        }
+      }
+    },
+    {
+      "id": "reset_window",
+      "in": {
+        "client_id": {
+          "type": "String",
+          "domain": "rate_limiting"
+        },
+        "window_seconds": {
+          "type": "Int",
+          "dimension": "time",
+          "unit": "seconds"
+        }
+      },
+      "out": {
+        "reset_at": {
+          "type": "Int",
+          "dimension": "time",
+          "unit": "seconds"
+        },
+        "cleared": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "post": ["reset_at > 0", "cleared == true"]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "reset_failed": {
+          "action": "retry",
+          "params": { "count": 2, "backoff": "linear" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "check_quota.within_limit", "to": "increment_counter.within_limit" },
+    { "from": "check_quota.within_limit", "to": "enforce_limit.within_limit" },
+    { "from": "check_quota.remaining", "to": "enforce_limit.remaining" }
+  ]
+}

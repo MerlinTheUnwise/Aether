@@ -1,0 +1,182 @@
+{
+  "id": "data_pipeline_etl",
+  "version": 1,
+  "effects": ["database.read", "database.write", "filesystem"],
+  "metadata": {
+    "description": "ETL data pipeline with data quality contracts and batch processing"
+  },
+  "nodes": [
+    {
+      "id": "fetch_raw_data",
+      "in": {
+        "source_uri": {
+          "type": "String",
+          "domain": "data_pipeline"
+        },
+        "batch_size": {
+          "type": "Int",
+          "range": [1, 100000]
+        }
+      },
+      "out": {
+        "raw_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        },
+        "record_count": {
+          "type": "Int"
+        }
+      },
+      "contract": {
+        "post": ["record_count >= 0"]
+      },
+      "effects": ["database.read"],
+      "recovery": {
+        "connection_error": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        },
+        "source_unavailable": {
+          "action": "escalate",
+          "params": { "message": "data source unavailable" }
+        }
+      }
+    },
+    {
+      "id": "validate_schema",
+      "in": {
+        "raw_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        }
+      },
+      "out": {
+        "valid_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        },
+        "invalid_count": {
+          "type": "Int"
+        }
+      },
+      "contract": {
+        "post": ["invalid_count >= 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "clean_nulls",
+      "in": {
+        "valid_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        }
+      },
+      "out": {
+        "cleaned_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        }
+      },
+      "contract": {
+        "post": ["cleaned_records.length >= 0"]
+      },
+      "pure": true,
+      "effects": [],
+      "supervised": {
+        "reason": "null handling strategy is domain-specific",
+        "review_status": "pending"
+      }
+    },
+    {
+      "id": "deduplicate",
+      "in": {
+        "cleaned_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        }
+      },
+      "out": {
+        "unique_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        },
+        "duplicates_removed": {
+          "type": "Int"
+        }
+      },
+      "contract": {
+        "post": ["duplicates_removed >= 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "aggregate",
+      "in": {
+        "unique_records": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        }
+      },
+      "out": {
+        "aggregated_data": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        },
+        "checksum": {
+          "type": "String"
+        }
+      },
+      "contract": {
+        "post": ["checksum.length > 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "write_output",
+      "in": {
+        "aggregated_data": {
+          "type": "List<Record>",
+          "domain": "data_pipeline"
+        },
+        "checksum": {
+          "type": "String"
+        }
+      },
+      "out": {
+        "rows_written": {
+          "type": "Int"
+        },
+        "success": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "pre": ["checksum.length > 0"],
+        "post": ["rows_written >= 0", "success == true"]
+      },
+      "effects": ["database.write", "filesystem"],
+      "recovery": {
+        "write_timeout": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        },
+        "write_failed": {
+          "action": "escalate",
+          "params": { "message": "output write failed" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "fetch_raw_data.raw_records", "to": "validate_schema.raw_records" },
+    { "from": "validate_schema.valid_records", "to": "clean_nulls.valid_records" },
+    { "from": "clean_nulls.cleaned_records", "to": "deduplicate.cleaned_records" },
+    { "from": "deduplicate.unique_records", "to": "aggregate.unique_records" },
+    { "from": "aggregate.aggregated_data", "to": "write_output.aggregated_data" },
+    { "from": "aggregate.checksum", "to": "write_output.checksum" }
+  ]
+}

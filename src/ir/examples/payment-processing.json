@@ -1,0 +1,214 @@
+{
+  "id": "payment_processing",
+  "version": 1,
+  "effects": ["payment_gateway.write", "database.write", "email"],
+  "metadata": {
+    "description": "Payment processing pipeline with temporal state transitions and complex recovery chains",
+    "safety_level": "high"
+  },
+  "nodes": [
+    {
+      "id": "validate_payment",
+      "in": {
+        "amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD",
+          "range": [0.01, 999999.99]
+        },
+        "card_token": {
+          "type": "String",
+          "format": "uuid_v4",
+          "sensitivity": "internal"
+        },
+        "merchant_id": {
+          "type": "String",
+          "domain": "commerce"
+        }
+      },
+      "out": {
+        "validated_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        },
+        "payment_id": {
+          "type": "String",
+          "format": "uuid_v4",
+          "domain": "payment"
+        },
+        "status": {
+          "type": "String",
+          "domain": "payment"
+        }
+      },
+      "contract": {
+        "pre": ["amount > 0", "card_token.length > 0"],
+        "post": ["validated_amount == amount", "status == created"]
+      },
+      "pure": true,
+      "confidence": 0.99,
+      "effects": []
+    },
+    {
+      "id": "authorize_card",
+      "in": {
+        "payment_id": {
+          "type": "String",
+          "format": "uuid_v4",
+          "domain": "payment"
+        },
+        "validated_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        },
+        "card_token": {
+          "type": "String",
+          "format": "uuid_v4",
+          "sensitivity": "internal"
+        }
+      },
+      "out": {
+        "authorization_code": {
+          "type": "String",
+          "domain": "payment"
+        },
+        "authorized_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        },
+        "status": {
+          "type": "String",
+          "domain": "payment"
+        }
+      },
+      "contract": {
+        "pre": ["validated_amount > 0"],
+        "post": ["authorized_amount == validated_amount", "status == authorized", "authorization_code.length > 0"],
+        "invariants": ["status != captured"]
+      },
+      "confidence": 0.80,
+      "adversarial_check": {
+        "break_if": [
+          "authorized_amount != validated_amount",
+          "status == captured"
+        ]
+      },
+      "effects": ["payment_gateway.write"],
+      "recovery": {
+        "gateway_timeout": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        },
+        "insufficient_funds": {
+          "action": "respond",
+          "params": { "status": 402, "body": "insufficient funds" }
+        },
+        "gateway_error": {
+          "action": "escalate",
+          "params": { "message": "payment gateway error", "preserve_context": true }
+        }
+      }
+    },
+    {
+      "id": "capture_funds",
+      "in": {
+        "authorization_code": {
+          "type": "String",
+          "domain": "payment"
+        },
+        "authorized_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        },
+        "payment_id": {
+          "type": "String",
+          "format": "uuid_v4",
+          "domain": "payment"
+        }
+      },
+      "out": {
+        "capture_id": {
+          "type": "String",
+          "domain": "payment"
+        },
+        "captured_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        },
+        "status": {
+          "type": "String",
+          "domain": "payment"
+        }
+      },
+      "contract": {
+        "pre": ["authorization_code.length > 0", "authorized_amount > 0"],
+        "post": ["captured_amount == authorized_amount", "status == captured"],
+        "invariants": ["captured_amount <= authorized_amount"]
+      },
+      "effects": ["payment_gateway.write", "database.write"],
+      "recovery": {
+        "capture_timeout": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        },
+        "capture_failed": {
+          "action": "fallback",
+          "params": { "node": "queue_for_retry" }
+        },
+        "critical_error": {
+          "action": "escalate",
+          "params": { "message": "fund capture failed after retries", "preserve_context": true }
+        }
+      }
+    },
+    {
+      "id": "send_receipt",
+      "in": {
+        "payment_id": {
+          "type": "String",
+          "format": "uuid_v4",
+          "domain": "payment"
+        },
+        "captured_amount": {
+          "type": "Float64",
+          "dimension": "currency",
+          "unit": "USD"
+        },
+        "capture_id": {
+          "type": "String",
+          "domain": "payment"
+        }
+      },
+      "out": {
+        "receipt_sent": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "post": ["receipt_sent == true"]
+      },
+      "effects": ["email"],
+      "recovery": {
+        "email_failed": {
+          "action": "report",
+          "params": { "channel": "ops-alerts" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "validate_payment.payment_id", "to": "authorize_card.payment_id" },
+    { "from": "validate_payment.validated_amount", "to": "authorize_card.validated_amount" },
+    { "from": "authorize_card.authorization_code", "to": "capture_funds.authorization_code" },
+    { "from": "authorize_card.authorized_amount", "to": "capture_funds.authorized_amount" },
+    { "from": "validate_payment.payment_id", "to": "capture_funds.payment_id" },
+    { "from": "validate_payment.payment_id", "to": "send_receipt.payment_id" },
+    { "from": "capture_funds.captured_amount", "to": "send_receipt.captured_amount" },
+    { "from": "capture_funds.capture_id", "to": "send_receipt.capture_id" }
+  ]
+}
