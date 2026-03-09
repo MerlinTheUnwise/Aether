@@ -11,7 +11,7 @@
  *   help                    Show usage
  */
 
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync as fsWriteFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
@@ -20,6 +20,11 @@ import { checkTypes } from "./compiler/checker.js";
 import { verifyGraph, type GraphVerificationReport } from "./compiler/verifier.js";
 import { transpileGraph, transpileToFile } from "./compiler/transpiler.js";
 import { IncrementalBuilder } from "./compiler/incremental.js";
+import { instantiateTemplate, validateTemplate } from "./compiler/templates.js";
+import { extractScope, verifyScope, checkBoundaryCompatibility, computeScopeOrder } from "./compiler/scopes.js";
+import { simulateWithStubs } from "./agents/simulator.js";
+import { resolveGraph, loadCertifiedLibrary } from "./compiler/resolver.js";
+import { diffGraphs, hasBreakingChanges, affectedNodes } from "./compiler/diff.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,11 +56,17 @@ Commands:
   transpile <path> [--output <dir>]  Generate JavaScript module
   report <path>                  Run ALL tools + summary dashboard
   generate <path>                Validate AI-generated IR with actionable feedback
+  instantiate <path> --bindings <json>  Instantiate a template with bindings
   incremental                    Start interactive incremental builder
   compact <path> [--output <p>]  Convert IR JSON to compact .aether form
   execute <path> [--inputs <p>]  Execute graph in runtime engine
   visualize <path> [--output <p>] [--execute] [--open]  Generate HTML visualization
   expand <path>                  Parse compact .aether form to IR JSON
+  scope <path> <scope-id>        Extract and validate a single scope
+  scope-check <path>             Validate all scopes and boundary compatibility
+  collaborate <path>             Simulate multi-agent collaboration on scoped graph
+  resolve <path>                 Resolve intent nodes against certified library
+  diff <path-v1> <path-v2>      Semantic diff between two graph versions
   help                           Show this message
 `.trim());
 }
@@ -168,6 +179,60 @@ async function cmdReport(filePath: string, outputDir: string): Promise<ReportRes
     result.schemaValid = true;
     console.log(`Schema:         ✓ valid`);
     console.log(`DAG:            ✓ acyclic (${graph.nodes.length} nodes, ${graph.edges.length} edges)`);
+
+    // Template info
+    const templates = (graph as any).templates as any[] | undefined;
+    const instances = (graph as any).template_instances as any[] | undefined;
+    if (templates && templates.length > 0) {
+      console.log(`Templates:      ${templates.length} defined, ${instances?.length ?? 0} instances`);
+      // Count instances per template
+      const counts = new Map<string, string[]>();
+      if (instances) {
+        for (const inst of instances) {
+          if (!counts.has(inst.template)) counts.set(inst.template, []);
+          counts.get(inst.template)!.push(inst.id);
+        }
+      }
+      for (const t of templates) {
+        const ids = counts.get(t.id) || [];
+        if (ids.length > 0) {
+          console.log(`                ${t.id} × ${ids.length} (${ids.join(", ")})`);
+        } else {
+          console.log(`                ${t.id} × 0`);
+        }
+      }
+    }
+
+    // Scope info
+    const scopesArr = (graph as any).scopes as any[] | undefined;
+    if (scopesArr && scopesArr.length > 0) {
+      const scopeNames = scopesArr.map((s: any) => s.id);
+      // Count cross-scope edges
+      const n2s = new Map<string, string>();
+      for (const s of scopesArr) for (const nid of s.nodes) n2s.set(nid, s.id);
+      let xEdges = 0;
+      for (const e of graph.edges) {
+        const f = e.from.split(".")[0], t = e.to.split(".")[0];
+        if (n2s.get(f) !== n2s.get(t)) xEdges++;
+      }
+
+      console.log(`Scopes:         ${scopesArr.length} defined (${scopeNames.join(", ")})`);
+
+      // Quick scope verification
+      try {
+        const scopeStatuses: string[] = [];
+        for (const s of scopesArr) {
+          const sv = extractScope(graph as any, s.id);
+          const vr = verifyScope(sv);
+          const valid = vr.internalValid && vr.boundariesSatisfied && vr.requirementsMet;
+          scopeStatuses.push(`${s.id} ${valid ? "✓" : "✗"}`);
+        }
+        console.log(`Boundaries:     ${xEdges} cross-scope edges`);
+        console.log(`Scope verify:   ${scopeStatuses.join(" | ")}`);
+      } catch {
+        console.log(`Boundaries:     ${xEdges} cross-scope edges`);
+      }
+    }
   } else {
     console.log(`Schema:         ✗ invalid`);
     valResult.errors.forEach(e => console.log(`                • ${e}`));
@@ -200,6 +265,30 @@ async function cmdReport(filePath: string, outputDir: string): Promise<ReportRes
   console.log(`Verification:   ${verifyReport.nodes_verified}/${verifiedTotal} nodes verified (${verifyReport.verification_percentage}%)`);
   if (verifyReport.nodes_unsupported > 0) {
     console.log(`                ${verifyReport.nodes_unsupported}/${verifyReport.results.length} unsupported expressions`);
+  }
+
+  // 3.5. Intent Resolution (if graph has intent nodes)
+  try {
+    const intentNodes = (graph as any).nodes.filter((n: any) => n.intent === true);
+    if (intentNodes.length > 0) {
+      const library = loadCertifiedLibrary();
+      const resolution = resolveGraph(graph as any, library);
+      console.log(`Intents:        ${resolution.intents_resolved}/${resolution.intents_found} resolved`);
+      for (const r of resolution.resolutions) {
+        if (r.resolved) {
+          console.log(`                ${r.intentId} → ${r.matchReason.split("(")[0].trim()}`);
+        }
+      }
+      if (resolution.intents_unresolved > 0) {
+        for (const r of resolution.resolutions) {
+          if (!r.resolved) {
+            console.log(`                ${r.intentId} → unresolved`);
+          }
+        }
+      }
+    }
+  } catch {
+    // Intent resolution is optional in report
   }
 
   // 4. Execute (stub mode)
@@ -680,6 +769,386 @@ async function cmdVisualize(filePath: string, args: string[]): Promise<string | 
   return outputPath;
 }
 
+// ─── Instantiate Command ─────────────────────────────────────────────────────
+
+function cmdInstantiate(templatePath: string, bindingsJson: string, outputPath?: string): boolean {
+  const template = JSON.parse(readFileSync(templatePath, "utf-8"));
+
+  // Validate template
+  const valResult = validateTemplate(template);
+  if (!valResult.valid) {
+    console.error("✗ Invalid template");
+    valResult.errors.forEach(e => console.error(`  • ${e}`));
+    return false;
+  }
+
+  // Parse bindings
+  let bindings: Record<string, unknown>;
+  try {
+    bindings = JSON.parse(bindingsJson);
+  } catch {
+    console.error("✗ Invalid bindings JSON");
+    return false;
+  }
+
+  // Create instance
+  const instance = {
+    id: template.id,
+    template: template.id,
+    bindings,
+  };
+
+  const result = instantiateTemplate(template, instance);
+  if (!result.success) {
+    console.error("✗ Instantiation failed");
+    result.errors.forEach(e => console.error(`  • ${e}`));
+    return false;
+  }
+
+  const output = {
+    template: template.id,
+    instance_id: instance.id,
+    nodes: result.nodes,
+    edges: result.edges,
+  };
+
+  const json = JSON.stringify(output, null, 2);
+  if (outputPath) {
+    fsWriteFileSync(outputPath, json, "utf-8");
+    console.log(`✓ Instantiated ${template.id} → ${outputPath} (${result.nodes.length} nodes, ${result.edges.length} edges)`);
+  } else {
+    console.log(json);
+  }
+
+  return true;
+}
+
+// ─── Scope Commands ──────────────────────────────────────────────────────────
+
+async function cmdScope(filePath: string, scopeId: string): Promise<boolean> {
+  const graph = loadGraph(filePath);
+  const sep = "═══════════════════════════════════════════";
+
+  console.log(sep);
+  console.log(`AETHER Scope: ${scopeId} (from ${graph.id})`);
+  console.log(sep);
+
+  try {
+    const scopeView = extractScope(graph as any, scopeId);
+    console.log(`Nodes:          ${scopeView.scope.nodes.length} (+ ${scopeView.boundaryStubs.length} boundary stubs)`);
+    console.log(`Internal edges: ${scopeView.internalEdges.length}`);
+    console.log(`Boundary edges: ${scopeView.boundaryEdges.length}`);
+
+    // Validate extracted scope
+    const valResult = (await import("./ir/validator.js")).validateGraph(scopeView.graph);
+    console.log(`Validation:     ${valResult.valid ? "✓" : "✗"} (${valResult.errors.length} errors, ${valResult.warnings.length} warnings)`);
+    if (!valResult.valid) {
+      valResult.errors.forEach(e => console.log(`  • ${e}`));
+    }
+
+    // Type check extracted scope
+    const checkResult = checkTypes(scopeView.graph as any);
+    console.log(`Types:          ${checkResult.compatible ? "✓" : "✗"} ${checkResult.errors.length} errors`);
+
+    // Verify scope boundaries
+    const verification = verifyScope(scopeView);
+    console.log(`Internal:       ${verification.internalValid ? "✓" : "✗"}`);
+    console.log(`Boundaries:     ${verification.boundariesSatisfied ? "✓ satisfied" : "✗ unsatisfied"}`);
+    console.log(`Requirements:   ${verification.requirementsMet ? "✓ met" : "✗ unmet"}`);
+
+    if (verification.errors.length > 0) {
+      verification.errors.forEach(e => console.log(`  • ${e}`));
+    }
+
+    console.log(sep);
+    return verification.errors.length === 0 && valResult.valid;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`  ✗ ${msg}`);
+    console.log(sep);
+    return false;
+  }
+}
+
+export interface ScopeCheckResult {
+  scopeCount: number;
+  allValid: boolean;
+  scopeResults: Array<{ id: string; valid: boolean; errors: string[] }>;
+  boundaryResults: Array<{ from: string; to: string; compatible: boolean; errors: string[] }>;
+  crossScopeEdges: number;
+}
+
+async function cmdScopeCheck(filePath: string): Promise<ScopeCheckResult> {
+  const graph = loadGraph(filePath);
+  const sep = "═══════════════════════════════════════════";
+
+  console.log(sep);
+  console.log(`AETHER Scope Check: ${graph.id}`);
+  console.log(sep);
+
+  const scopes = (graph as any).scopes as any[] | undefined;
+  if (!scopes || scopes.length === 0) {
+    console.log("No scopes defined.");
+    console.log(sep);
+    return { scopeCount: 0, allValid: true, scopeResults: [], boundaryResults: [], crossScopeEdges: 0 };
+  }
+
+  const scopeResults: Array<{ id: string; valid: boolean; errors: string[] }> = [];
+  const boundaryResults: Array<{ from: string; to: string; compatible: boolean; errors: string[] }> = [];
+
+  // Validate all scopes
+  const scopeNames: string[] = [];
+  for (const scope of scopes) {
+    const scopeView = extractScope(graph as any, scope.id);
+    const verification = verifyScope(scopeView);
+    const valid = verification.internalValid && verification.boundariesSatisfied && verification.requirementsMet;
+    scopeResults.push({ id: scope.id, valid, errors: verification.errors });
+    scopeNames.push(scope.id);
+  }
+
+  // Count cross-scope edges
+  const nodeToScope = new Map<string, string>();
+  for (const scope of scopes) {
+    for (const nodeId of scope.nodes) {
+      nodeToScope.set(nodeId, scope.id);
+    }
+  }
+
+  let crossScopeEdges = 0;
+  for (const edge of graph.edges) {
+    const from = edge.from.split(".")[0];
+    const to = edge.to.split(".")[0];
+    if (nodeToScope.get(from) !== nodeToScope.get(to)) {
+      crossScopeEdges++;
+    }
+  }
+
+  // Check boundary compatibility between connected scopes
+  const scopeOrder = computeScopeOrder(graph as any);
+  const scopeMap = new Map(scopes.map((s: any) => [s.id, s]));
+
+  for (const edge of graph.edges) {
+    const from = edge.from.split(".")[0];
+    const to = edge.to.split(".")[0];
+    const fromScopeId = nodeToScope.get(from);
+    const toScopeId = nodeToScope.get(to);
+    if (!fromScopeId || !toScopeId || fromScopeId === toScopeId) continue;
+
+    // Check if we already have this pair
+    if (boundaryResults.some(b => b.from === fromScopeId && b.to === toScopeId)) continue;
+
+    const compat = checkBoundaryCompatibility(scopeMap.get(fromScopeId)!, scopeMap.get(toScopeId)!);
+    boundaryResults.push({
+      from: fromScopeId,
+      to: toScopeId,
+      compatible: compat.compatible,
+      errors: compat.errors,
+    });
+  }
+
+  // Print results
+  console.log(`Scopes:         ${scopes.length} defined (${scopeNames.join(", ")})`);
+  console.log(`Boundaries:     ${crossScopeEdges} cross-scope edges, ${boundaryResults.filter(b => b.compatible).length === boundaryResults.length ? "all compatible" : "some incompatible"}`);
+
+  const scopeStatus = scopeResults.map(r => `${r.id} ${r.valid ? "✓" : "✗"}`).join(" | ");
+  console.log(`Scope verify:   ${scopeStatus}`);
+
+  for (const r of scopeResults) {
+    if (!r.valid) {
+      r.errors.forEach(e => console.log(`  • [${r.id}] ${e}`));
+    }
+  }
+
+  for (const b of boundaryResults) {
+    if (!b.compatible) {
+      b.errors.forEach(e => console.log(`  • [${b.from}→${b.to}] ${e}`));
+    }
+  }
+
+  console.log(sep);
+
+  const allValid = scopeResults.every(r => r.valid) && boundaryResults.every(b => b.compatible);
+  return { scopeCount: scopes.length, allValid, scopeResults, boundaryResults, crossScopeEdges };
+}
+
+// ─── Collaborate Command ─────────────────────────────────────────────────────
+
+export interface CollaborateResult {
+  graphId: string;
+  scopeCount: number;
+  overall: string;
+  verificationPercentage: number;
+  composedConfidence: number;
+}
+
+async function cmdCollaborate(filePath: string): Promise<CollaborateResult> {
+  const graph = loadGraph(filePath);
+  const sep = "═══════════════════════════════════════════════════";
+
+  const scopes = (graph as any).scopes as any[] | undefined;
+  if (!scopes || scopes.length === 0) {
+    console.log("No scopes defined — nothing to collaborate on.");
+    return { graphId: graph.id, scopeCount: 0, overall: "failed", verificationPercentage: 0, composedConfidence: 0 };
+  }
+
+  const { session, report } = await simulateWithStubs(graph as any);
+
+  // Compute composed confidence from boundary contract confidences
+  const confidences: number[] = [];
+  for (const scope of scopes) {
+    const provides = scope.boundary_contracts?.provides ?? [];
+    for (const prov of provides) {
+      if (prov.confidence !== undefined) {
+        confidences.push(prov.confidence);
+      }
+    }
+  }
+  // Also collect node-level confidences
+  for (const node of graph.nodes) {
+    if ((node as any).confidence !== undefined) {
+      confidences.push((node as any).confidence);
+    }
+  }
+  const composedConfidence = confidences.length > 0
+    ? confidences.reduce((a, b) => a * b, 1)
+    : 1.0;
+
+  console.log(sep);
+  console.log(`AETHER Collaboration: ${graph.id} (v${graph.version})`);
+  console.log(sep);
+  console.log(`Agents:         ${scopes.length} assigned`);
+
+  for (const scopeResult of report.scopes) {
+    const submitted = scopeResult.status !== "pending" ? "submitted ✓" : "submitted ✗";
+    const verified = scopeResult.status === "verified" ? "verified ✓" : scopeResult.status === "rejected" ? "verified ✗" : "pending";
+    console.log(`  ${scopeResult.agent_id} → ${scopeResult.scope_id.padEnd(16)} ${submitted}  ${verified}`);
+  }
+
+  console.log(`Boundaries:`);
+  for (const compat of report.cross_scope_compatibility) {
+    const status = compat.compatible ? "✓ compatible" : "✗ incompatible";
+    console.log(`  ${compat.provider_scope} → ${compat.requirer_scope.padEnd(16)} ${status}`);
+    for (const err of compat.errors) {
+      console.log(`    • ${err}`);
+    }
+  }
+
+  const integrationStatus = report.overall === "integrated"
+    ? "✓ all scopes verified"
+    : report.overall === "partial"
+      ? `partial — ${report.verification_percentage}% verified`
+      : "✗ integration failed";
+  console.log(`Integration:    ${integrationStatus}`);
+  console.log(`Composed conf:  ${composedConfidence.toFixed(2)}`);
+  console.log(sep);
+
+  return {
+    graphId: graph.id,
+    scopeCount: scopes.length,
+    overall: report.overall,
+    verificationPercentage: report.verification_percentage,
+    composedConfidence,
+  };
+}
+
+// ─── Resolve Command ─────────────────────────────────────────────────────────
+
+export interface ResolveResult {
+  graphId: string;
+  intentsFound: number;
+  intentsResolved: number;
+  intentsUnresolved: number;
+}
+
+function cmdResolve(filePath: string): ResolveResult {
+  const graph = loadGraph(filePath);
+  const library = loadCertifiedLibrary();
+  const report = resolveGraph(graph as any, library);
+
+  const sep = "═══════════════════════════════════════════";
+  console.log(sep);
+  console.log(`AETHER Intent Resolution: ${graph.id} (v${graph.version})`);
+  console.log(sep);
+  console.log(`Intents found:    ${report.intents_found}`);
+  console.log(`Resolved:         ${report.intents_resolved}`);
+
+  for (const r of report.resolutions) {
+    if (r.resolved) {
+      console.log(`  ${r.intentId.padEnd(20)} → ${r.matchReason}`);
+    }
+  }
+
+  console.log(`Unresolved:       ${report.intents_unresolved}`);
+  for (const r of report.resolutions) {
+    if (!r.resolved) {
+      console.log(`  ${r.intentId.padEnd(20)} → ${r.matchReason}`);
+    }
+  }
+
+  console.log(sep);
+
+  return {
+    graphId: graph.id,
+    intentsFound: report.intents_found,
+    intentsResolved: report.intents_resolved,
+    intentsUnresolved: report.intents_unresolved,
+  };
+}
+
+// ─── Diff Command ────────────────────────────────────────────────────────────
+
+export interface DiffResult {
+  graphId: string;
+  changes: number;
+  breaking: boolean;
+  breakingChanges: string[];
+}
+
+function cmdDiff(filePath1: string, filePath2: string): DiffResult {
+  const graph1 = loadGraph(filePath1);
+  const graph2 = loadGraph(filePath2);
+
+  const diff = diffGraphs(graph1 as any, graph2 as any);
+  const breaking = hasBreakingChanges(diff);
+  const affected = affectedNodes(diff, graph2 as any);
+
+  const sep = "═══════════════════════════════════════════";
+  console.log(sep);
+  console.log(`AETHER Semantic Diff: ${graph1.id} v${diff.version_from} → v${diff.version_to}`);
+  console.log(sep);
+
+  console.log(`Changes:          ${diff.changes.length}`);
+  console.log(`  Nodes added:    ${diff.impact.nodes_added}`);
+  console.log(`  Nodes removed:  ${diff.impact.nodes_removed}`);
+  console.log(`  Types changed:  ${diff.impact.types_changed}`);
+  console.log(`  Contracts:      ${diff.impact.contracts_changed}`);
+  console.log(`  Effects:        ${diff.impact.effects_changed}`);
+  console.log(`  Confidence:     ${diff.impact.confidence_changed}`);
+
+  if (breaking) {
+    console.log(`\nBreaking changes: ${diff.impact.breaking_changes.length}`);
+    for (const bc of diff.impact.breaking_changes) {
+      console.log(`  ⚠  ${bc}`);
+    }
+  } else {
+    console.log(`\nBreaking changes: none`);
+  }
+
+  if (affected.length > 0) {
+    console.log(`\nRe-verification needed: ${affected.length} node(s)`);
+    console.log(`  ${affected.join(", ")}`);
+  }
+
+  console.log(sep);
+
+  return {
+    graphId: graph1.id,
+    changes: diff.changes.length,
+    breaking,
+    breakingChanges: diff.impact.breaking_changes,
+  };
+}
+
 // ─── Compact/Expand Commands ─────────────────────────────────────────────────
 
 async function cmdCompact(filePath: string, outputDir: string): Promise<void> {
@@ -761,6 +1230,19 @@ if (__isCliMain) {
           break;
         }
 
+        case "instantiate": {
+          const bindingsIdx = args.indexOf("--bindings");
+          const bindingsArg = bindingsIdx >= 0 ? args[bindingsIdx + 1] : undefined;
+          if (!bindingsArg) {
+            console.error("Error: --bindings <json> is required for instantiate");
+            process.exit(1);
+          }
+          const instOutputIdx = args.indexOf("--output");
+          const instOutput = instOutputIdx >= 0 ? args[instOutputIdx + 1] : undefined;
+          if (!cmdInstantiate(cliFilePath, bindingsArg, instOutput)) process.exit(1);
+          break;
+        }
+
         case "incremental":
           await cmdIncremental();
           break;
@@ -783,6 +1265,43 @@ if (__isCliMain) {
         case "expand":
           await cmdExpand(cliFilePath);
           break;
+
+        case "scope": {
+          const scopeIdArg = args[2];
+          if (!scopeIdArg) {
+            console.error("Error: missing <scope-id> argument");
+            process.exit(1);
+          }
+          if (!(await cmdScope(cliFilePath, scopeIdArg))) process.exit(1);
+          break;
+        }
+
+        case "scope-check": {
+          const scResult = await cmdScopeCheck(cliFilePath);
+          if (!scResult.allValid) process.exit(1);
+          break;
+        }
+
+        case "collaborate": {
+          const collab = await cmdCollaborate(cliFilePath);
+          if (collab.overall === "failed") process.exit(1);
+          break;
+        }
+
+        case "resolve": {
+          cmdResolve(cliFilePath);
+          break;
+        }
+
+        case "diff": {
+          const diffPath2 = args[2];
+          if (!diffPath2) {
+            console.error("Error: missing second <path-to-json> argument for diff");
+            process.exit(1);
+          }
+          cmdDiff(cliFilePath, diffPath2);
+          break;
+        }
 
         default:
           console.error(`Unknown command: ${command}`);

@@ -1,0 +1,74 @@
+{
+  "id": "auth-gate",
+  "description": "Authentication gate: validate token, load user, check permissions",
+  "parameters": [
+    { "name": "TokenType", "kind": "type" },
+    { "name": "UserType", "kind": "type" },
+    { "name": "auth_effect", "kind": "effect" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_token",
+      "in": {
+        "token": { "type": "$TokenType" }
+      },
+      "out": {
+        "claims": { "type": "TokenClaims" },
+        "valid": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.token != null"],
+        "post": ["output.valid == true"]
+      },
+      "effects": ["$auth_effect"],
+      "recovery": {
+        "invalid_token": { "action": "respond", "params": { "status": 401 } },
+        "expired_token": { "action": "respond", "params": { "status": 401 } }
+      }
+    },
+    {
+      "id": "load_user",
+      "in": {
+        "claims": { "type": "TokenClaims" }
+      },
+      "out": {
+        "user": { "type": "$UserType" }
+      },
+      "contract": {
+        "pre": ["input.claims != null"],
+        "post": ["output.user != null"]
+      },
+      "effects": ["$auth_effect"],
+      "recovery": {
+        "user_not_found": { "action": "respond", "params": { "status": 401 } }
+      }
+    },
+    {
+      "id": "check_permissions",
+      "in": {
+        "user": { "type": "$UserType" }
+      },
+      "out": {
+        "authorized_user": { "type": "$UserType" }
+      },
+      "contract": {
+        "pre": ["input.user != null"],
+        "post": ["output.authorized_user != null"]
+      },
+      "effects": ["$auth_effect"],
+      "recovery": {
+        "forbidden": { "action": "respond", "params": { "status": 403 } }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "validate_token.claims", "to": "load_user.claims" },
+    { "from": "load_user.user", "to": "check_permissions.user" }
+  ],
+  "exposed_inputs": {
+    "token": "validate_token.token"
+  },
+  "exposed_outputs": {
+    "authenticated_user": "check_permissions.authorized_user"
+  }
+}

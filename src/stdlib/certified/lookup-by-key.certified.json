@@ -1,0 +1,51 @@
+{
+  "id": "lookup-by-key",
+  "description": "Look up an element in a collection by key using an accessor. If found, accessor(result) equals key; if not found, no element has that key.",
+  "interface": {
+    "in": {
+      "collection": { "type": "Collection<T>" },
+      "key": { "type": "Any" },
+      "accessor": { "type": "Accessor<T, Any>" }
+    },
+    "out": {
+      "result": { "type": "T?" },
+      "found": { "type": "Bool" }
+    }
+  },
+  "contracts": {
+    "pre": ["input.collection != null", "input.key != null"],
+    "post": [
+      "if output.found == true then accessor(output.result) == input.key",
+      "if output.found == false then no element in input.collection has accessor(element) == input.key"
+    ]
+  },
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(1)"
+  },
+  "deterministic": true,
+  "nodes": [
+    {
+      "id": "lookup_impl",
+      "in": {
+        "collection": { "type": "Collection<T>" },
+        "key": { "type": "Any" },
+        "accessor": { "type": "Accessor<T, Any>" }
+      },
+      "out": {
+        "result": { "type": "T?" },
+        "found": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.collection != null", "input.key != null"],
+        "post": [
+          "if output.found == true then accessor(output.result) == input.key",
+          "if output.found == false then no element in input.collection has accessor(element) == input.key"
+        ]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": []
+}

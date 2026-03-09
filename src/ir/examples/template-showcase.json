@@ -1,0 +1,158 @@
+{
+  "id": "template-showcase",
+  "version": 1,
+  "effects": ["database.write", "database.read", "auth.verify"],
+  "metadata": {
+    "description": "Demonstrates template usage: CRUD entities and auth gate with template instantiation"
+  },
+  "templates": [
+    {
+      "id": "crud-entity",
+      "description": "CRUD operations for a typed entity",
+      "parameters": [
+        { "name": "Entity", "kind": "type" },
+        { "name": "IdType", "kind": "type" },
+        { "name": "storage_effect", "kind": "effect" }
+      ],
+      "nodes": [
+        {
+          "id": "validate_input",
+          "in": { "data": { "type": "$Entity" } },
+          "out": { "validated": { "type": "$Entity" } },
+          "contract": { "pre": ["input.data != null"], "post": ["output.validated != null"] },
+          "effects": [],
+          "pure": true
+        },
+        {
+          "id": "create_entity",
+          "in": { "data": { "type": "$Entity" } },
+          "out": { "entity": { "type": "$Entity" }, "success": { "type": "Bool" } },
+          "contract": { "pre": ["input.data != null"], "post": ["output.success == true"] },
+          "effects": ["$storage_effect"],
+          "recovery": { "storage_failure": { "action": "retry", "params": { "max": 3 } } }
+        },
+        {
+          "id": "read_entity",
+          "in": { "entity_id": { "type": "$IdType" } },
+          "out": { "entity": { "type": "$Entity" } },
+          "contract": { "pre": ["input.entity_id != null"], "post": ["output.entity != null"] },
+          "effects": ["$storage_effect"],
+          "recovery": { "not_found": { "action": "respond", "params": { "status": 404 } } }
+        }
+      ],
+      "edges": [
+        { "from": "validate_input.validated", "to": "create_entity.data" }
+      ],
+      "exposed_inputs": { "data": "validate_input.data", "entity_id": "read_entity.entity_id" },
+      "exposed_outputs": { "entity": "read_entity.entity", "success": "create_entity.success" }
+    },
+    {
+      "id": "auth-gate",
+      "description": "Authentication gate with token validation and permission check",
+      "parameters": [
+        { "name": "TokenType", "kind": "type" },
+        { "name": "UserType", "kind": "type" },
+        { "name": "auth_effect", "kind": "effect" }
+      ],
+      "nodes": [
+        {
+          "id": "validate_token",
+          "in": { "token": { "type": "$TokenType" } },
+          "out": { "claims": { "type": "TokenClaims" }, "valid": { "type": "Bool" } },
+          "contract": { "pre": ["input.token != null"], "post": ["output.valid == true"] },
+          "effects": ["$auth_effect"],
+          "recovery": { "invalid_token": { "action": "respond", "params": { "status": 401 } } }
+        },
+        {
+          "id": "load_user",
+          "in": { "claims": { "type": "TokenClaims" } },
+          "out": { "user": { "type": "$UserType" } },
+          "contract": { "pre": ["input.claims != null"], "post": ["output.user != null"] },
+          "effects": ["$auth_effect"],
+          "recovery": { "user_not_found": { "action": "respond", "params": { "status": 401 } } }
+        },
+        {
+          "id": "check_permissions",
+          "in": { "user": { "type": "$UserType" } },
+          "out": { "authorized_user": { "type": "$UserType" } },
+          "contract": { "pre": ["input.user != null"], "post": ["output.authorized_user != null"] },
+          "effects": ["$auth_effect"],
+          "recovery": { "forbidden": { "action": "respond", "params": { "status": 403 } } }
+        }
+      ],
+      "edges": [
+        { "from": "validate_token.claims", "to": "load_user.claims" },
+        { "from": "load_user.user", "to": "check_permissions.user" }
+      ],
+      "exposed_inputs": { "token": "validate_token.token" },
+      "exposed_outputs": { "authenticated_user": "check_permissions.authorized_user" }
+    }
+  ],
+  "template_instances": [
+    {
+      "id": "user_crud",
+      "template": "crud-entity",
+      "bindings": {
+        "Entity": { "type": "User" },
+        "IdType": { "type": "UserID" },
+        "storage_effect": "database.write"
+      }
+    },
+    {
+      "id": "product_crud",
+      "template": "crud-entity",
+      "bindings": {
+        "Entity": { "type": "Product" },
+        "IdType": { "type": "ProductID" },
+        "storage_effect": "database.write"
+      }
+    },
+    {
+      "id": "main_auth",
+      "template": "auth-gate",
+      "bindings": {
+        "TokenType": { "type": "JWT" },
+        "UserType": { "type": "AuthenticatedUser" },
+        "auth_effect": "auth.verify"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "api_router",
+      "in": {
+        "request": { "type": "HTTPRequest" }
+      },
+      "out": {
+        "token": { "type": "JWT" },
+        "entity_data": { "type": "String" },
+        "route": { "type": "String" }
+      },
+      "contract": {
+        "pre": ["input.request != null"],
+        "post": ["output.route != null"]
+      },
+      "effects": [],
+      "pure": true
+    },
+    {
+      "id": "response_builder",
+      "in": {
+        "data": { "type": "String" },
+        "status": { "type": "Int" }
+      },
+      "out": {
+        "response": { "type": "HTTPResponse" }
+      },
+      "contract": {
+        "pre": ["input.status > 0"],
+        "post": ["output.response != null"]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": [
+    { "from": "api_router.route", "to": "response_builder.data" }
+  ]
+}

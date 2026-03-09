@@ -1,0 +1,144 @@
+{
+  "id": "daily-report",
+  "version": 2,
+  "effects": ["database.read", "email", "logging"],
+  "metadata": {
+    "description": "Daily revenue report pipeline v2 — added validation, changed confidence, added effect"
+  },
+  "nodes": [
+    {
+      "id": "fetch_data",
+      "in": {
+        "query": { "type": "String" }
+      },
+      "out": {
+        "transactions": { "type": "List<Transaction>" }
+      },
+      "contract": {
+        "pre": ["input.query != null"],
+        "post": ["output.transactions != null"]
+      },
+      "effects": ["database.read"],
+      "recovery": {
+        "db_timeout": { "action": "retry", "params": { "max": 3, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "validate_dates",
+      "in": {
+        "transactions": { "type": "List<Transaction>" }
+      },
+      "out": {
+        "validated": { "type": "List<Transaction>" },
+        "invalid_count": { "type": "Number" }
+      },
+      "contract": {
+        "pre": ["input.transactions != null"],
+        "post": ["output.validated != null", "output.invalid_count >= 0"]
+      },
+      "effects": [],
+      "pure": true
+    },
+    {
+      "id": "sort_results",
+      "intent": true,
+      "ensure": [
+        "output is sorted by date",
+        "output is permutation of input",
+        "length preserved"
+      ],
+      "in": {
+        "collection": { "type": "List<Transaction>" }
+      },
+      "out": {
+        "sorted": { "type": "List<Transaction>" }
+      },
+      "constraints": {
+        "time_complexity": "O(n log n)",
+        "deterministic": true
+      }
+    },
+    {
+      "id": "remove_dupes",
+      "intent": true,
+      "ensure": [
+        "output has no duplicates",
+        "output is subset of input",
+        "all unique elements preserved"
+      ],
+      "in": {
+        "collection": { "type": "List<Transaction>" }
+      },
+      "out": {
+        "deduplicated": { "type": "List<Transaction>" }
+      },
+      "constraints": {
+        "deterministic": true
+      }
+    },
+    {
+      "id": "sum_revenue",
+      "intent": true,
+      "ensure": [
+        "total equals sum of amounts",
+        "output.total == sum of accessor(element) for all elements"
+      ],
+      "in": {
+        "collection": { "type": "List<Transaction>" },
+        "accessor": { "type": "Accessor<Transaction, Numeric>" }
+      },
+      "out": {
+        "total": { "type": "Numeric" }
+      },
+      "confidence": 0.8,
+      "constraints": {
+        "deterministic": true
+      }
+    },
+    {
+      "id": "format_report",
+      "in": {
+        "total": { "type": "Numeric" },
+        "transactions": { "type": "List<Transaction>" }
+      },
+      "out": {
+        "report": { "type": "String" },
+        "summary": { "type": "String" }
+      },
+      "contract": {
+        "pre": ["input.total != null", "input.transactions != null"],
+        "post": ["output.report != null", "output.report.length > 0"]
+      },
+      "effects": ["logging"],
+      "recovery": {
+        "log_failure": { "action": "fallback", "params": { "skip_logging": true } }
+      }
+    },
+    {
+      "id": "deliver",
+      "in": {
+        "report": { "type": "String" }
+      },
+      "out": {
+        "sent": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.report != null"],
+        "post": ["output.sent == true"]
+      },
+      "effects": ["email"],
+      "recovery": {
+        "send_failure": { "action": "retry", "params": { "max": 2, "backoff": "linear" } }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "fetch_data.transactions", "to": "validate_dates.transactions" },
+    { "from": "validate_dates.validated", "to": "sort_results.collection" },
+    { "from": "sort_results.sorted", "to": "remove_dupes.collection" },
+    { "from": "remove_dupes.deduplicated", "to": "sum_revenue.collection" },
+    { "from": "remove_dupes.deduplicated", "to": "format_report.transactions" },
+    { "from": "sum_revenue.total", "to": "format_report.total" },
+    { "from": "format_report.report", "to": "deliver.report" }
+  ]
+}

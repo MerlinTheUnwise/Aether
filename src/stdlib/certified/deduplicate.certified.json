@@ -1,0 +1,47 @@
+{
+  "id": "deduplicate",
+  "description": "Remove duplicate elements from a collection. Output has no duplicates, is a subset of input, and preserves all unique elements.",
+  "interface": {
+    "in": {
+      "collection": { "type": "Collection<T>" }
+    },
+    "out": {
+      "deduplicated": { "type": "Collection<T>" }
+    }
+  },
+  "contracts": {
+    "pre": ["input.collection != null"],
+    "post": [
+      "output.deduplicated has no duplicates",
+      "output.deduplicated is subset of input.collection",
+      "all unique elements of input.collection are in output.deduplicated"
+    ]
+  },
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "deterministic": true,
+  "nodes": [
+    {
+      "id": "dedup_impl",
+      "in": {
+        "collection": { "type": "Collection<T>" }
+      },
+      "out": {
+        "deduplicated": { "type": "Collection<T>" }
+      },
+      "contract": {
+        "pre": ["input.collection != null"],
+        "post": [
+          "output.deduplicated has no duplicates",
+          "output.deduplicated is subset of input.collection",
+          "all unique elements of input.collection are in output.deduplicated"
+        ]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": []
+}

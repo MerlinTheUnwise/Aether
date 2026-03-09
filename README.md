@@ -10,21 +10,13 @@ AETHER is an AI-native programming language where programs are directed acyclic 
 
 Traditional languages let you write anything and hope tests catch bugs. AETHER inverts this: programs must declare *what they promise* (contracts), *how confident they are* (confidence scores), *what side effects they cause* (effect tags), and *what happens when things fail* (recovery blocks). An SMT solver (Z3) formally verifies these properties before code ever runs.
 
-## Phase 0 — Foundation (Complete)
+## Status
 
-Phase 0 builds the core toolchain that proves the language design works:
+**476 tests passing** across 38 test files. Zero TypeScript errors.
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| IR Schema | `src/ir/schema.json` | JSON Schema defining AetherGraph structure |
-| Validator | `src/ir/validator.ts` | Structural validation (DAG check, port wiring, confidence rules) |
-| Type Checker | `src/compiler/checker.ts` | Semantic compatibility (dimension, unit, domain, sensitivity) |
-| Contract Verifier | `src/compiler/verifier.ts` | Z3 SMT verification of pre/postconditions and adversarial checks |
-| Transpiler | `src/compiler/transpiler.ts` | IR to JavaScript with parallel waves, confidence propagation, recovery |
-| CLI | `src/cli.ts` | Unified interface for all tools |
-| Specs | `spec/` | Formal specifications for types, contracts, effects, confidence, recovery |
+Phases 0, 1, and 2 are complete. The CLI has 15 commands spanning validation, execution, visualization, collaboration, and semantic analysis.
 
-### Six Pillars
+## The Eight Pillars
 
 1. **Graph-Native** — Programs are DAGs, not text files
 2. **Contracts Everywhere** — Pre/post/invariants on every node, verified by Z3
@@ -32,50 +24,86 @@ Phase 0 builds the core toolchain that proves the language design works:
 4. **Effect System** — Side effects are declared, tracked, and require recovery handlers
 5. **Recovery by Design** — No unhandled exceptions; every failure mode has a declared strategy
 6. **Parallel by Default** — Independent nodes execute concurrently via `Promise.all`
+7. **Intent Resolution** — Declare *what* you need; the runtime resolves *how* from certified algorithms
+8. **Multi-Agent Composition** — Graphs decompose into scopes that independent agents build and integrate
 
 ## Quick Start
 
 ```bash
 npm install
 npm run typecheck    # Zero errors
-npm test             # 53 tests passing
+npm test             # 476 tests passing
 ```
 
 ### CLI Commands
 
 ```bash
-# Run with tsx (recommended) or ts-node for single-file tools
+# Core pipeline
 npx tsx src/cli.ts validate src/ir/examples/user-registration.json
 npx tsx src/cli.ts check src/ir/examples/user-registration.json
 npx tsx src/cli.ts verify src/ir/examples/user-registration.json
 npx tsx src/cli.ts transpile src/ir/examples/user-registration.json
+npx tsx src/cli.ts execute src/ir/examples/user-registration.json
+npx tsx src/cli.ts visualize src/ir/examples/user-registration.json
 npx tsx src/cli.ts report src/ir/examples/user-registration.json
+
+# Compact form (60-70% smaller than JSON)
+npx tsx src/cli.ts compact src/ir/examples/user-registration.json
+npx tsx src/cli.ts expand program.aether
+
+# Intent resolution
+npx tsx src/cli.ts resolve src/ir/examples/intent-data-pipeline.json
+
+# Semantic diff between graph versions
+npx tsx src/cli.ts diff src/ir/examples/intent-data-pipeline.json src/ir/examples/intent-data-pipeline-v2.json
+
+# Scopes and multi-agent collaboration
+npx tsx src/cli.ts scope-check src/ir/examples/scoped-ecommerce.json
+npx tsx src/cli.ts collaborate src/ir/examples/multi-agent-marketplace.json
+
+# Templates
+npx tsx src/cli.ts instantiate src/ir/examples/template-showcase.json
 ```
 
 The `report` command runs the full pipeline and produces a dashboard:
 
 ```
-═══════════════════════════════════════
-AETHER Report: user_registration (v1)
-═══════════════════════════════════════
-Schema:       ✓ valid
-DAG:          ✓ acyclic (3 nodes, 3 edges)
-Types:        ✓ 3/3 edges compatible
-Verification: 0/1 nodes verified (0%)
-              2/3 unsupported expressions
-Transpiled:   ✓ user_registration.generated.js
-═══════════════════════════════════════
+═══════════════════════════════════════════════════
+AETHER Report: daily-report (v1)
+═══════════════════════════════════════════════════
+Schema:         ✓ valid
+DAG:            ✓ acyclic (6 nodes, 6 edges)
+Types:          ✓ 6/6 edges compatible
+Verification:   0/3 nodes verified (0%)
+Intents:        3/3 resolved
+                sort_results → sort-ascending
+                remove_dupes → deduplicate
+                sum_revenue → aggregate-sum
+Execution:      ✓ 3 nodes in 2 waves (stub mode)
+                Final confidence: 1.00
+                Effects: database.read, email
+Visualization:  ✓ daily-report.html generated
+═══════════════════════════════════════════════════
 ```
 
 ## Reference Programs
 
-Three example programs demonstrate the language features:
+12 example programs demonstrate the full feature set:
 
-- **`user-registration.json`** — Email validation → uniqueness check → user creation. Shows dependent types (`constraint: "== true"`), PII sensitivity tracking, and recovery (retry, fallback, escalate).
-
-- **`product-recommendations.json`** — Auth → purchase history → ML recommendations. Shows adversarial checks (no duplicate recommendations), confidence degradation (0.85), and SLA declarations.
-
-- **`customer-support-agent.json`** — Intent classification → guarded execution. Shows low confidence (0.75) with mandatory adversarial checks, authority-level safety rails, and human oversight gates.
+| Program | Nodes | Features |
+|---------|-------|----------|
+| `user-registration` | 3 | Contracts, PII sensitivity, recovery strategies |
+| `product-recommendations` | 2 | Adversarial checks, confidence degradation, SLA |
+| `customer-support-agent` | 3 | Low confidence oversight, authority rails |
+| `content-moderation-agent` | 4 | Effect hierarchies, supervised execution |
+| `payment-processing` | 4 | Financial domain types, multi-stage recovery |
+| `rate-limiter` | 4 | State tracking, temporal contracts |
+| `order-lifecycle` | 6 | State machine types, transition validation |
+| `template-showcase` | 2+3 | Template instantiation, parameterized patterns |
+| `scoped-ecommerce` | 8 | Scope boundaries, cross-scope contracts |
+| `multi-scope-order` | 4 scopes | Multi-scope ordering, boundary compatibility |
+| `multi-agent-marketplace` | 12 | 4-agent collaboration, integration verification |
+| `intent-data-pipeline` | 6 | Intent nodes, certified algorithm resolution |
 
 ## Project Structure
 
@@ -83,28 +111,38 @@ Three example programs demonstrate the language features:
 src/
   ir/
     schema.json              # JSON Schema for AetherGraph
-    validator.ts             # Structural validator
-    examples/                # Reference programs
+    validator.ts             # Structural validator (7 rules + IntentNode + StateType)
+    examples/                # 12 reference programs
   compiler/
     checker.ts               # Semantic type checker
-    verifier.ts              # Z3 contract verifier
+    verifier.ts              # Z3 contract verifier + state type invariants
     transpiler.ts            # IR → JavaScript transpiler
-  cli.ts                     # Unified CLI
-spec/
-  type-system.md             # Type system specification
-  contracts.md               # Contract specification
-  effects.md                 # Effect system specification
-  confidence.md              # Confidence propagation specification
-  recovery.md                # Recovery strategy specification
-tests/
-  reference/                 # Validation + type check + transpile tests
-  adversarial/               # Z3 verification tests
-  transpiler/                # Transpiler unit tests
-  integration/               # Full pipeline tests
+    compact.ts               # Bidirectional compact form (.aether ↔ .json)
+    resolver.ts              # Intent → certified algorithm resolution
+    diff.ts                  # Semantic diff engine (breaking change detection)
+    templates.ts             # Template engine (validate, instantiate, substitute)
+    scopes.ts                # Scope extraction and boundary verification
+    incremental.ts           # Incremental builder (partial graphs)
+  runtime/
+    confidence.ts            # Confidence propagation engine
+    effects.ts               # Effect tracking and enforcement
+    executor.ts              # DAG executor (wave scheduling, contracts, recovery)
+  agents/
+    protocol.ts              # Multi-agent collaboration protocol
+    simulator.ts             # Agent simulation and integration testing
+  visualizer/
+    generate.ts              # SVG-based HTML graph visualization
+  stdlib/
+    certified/               # 6 verified algorithms (sort, filter, dedup, aggregate, validate, lookup)
+    patterns/                # 4 reusable templates (CRUD, retry, auth-gate, confidence-cascade)
+  cli.ts                     # Unified CLI (15 commands)
+spec/                        # Formal specifications
+tests/                       # 38 test files, 476 tests
 ```
 
 ## Roadmap
 
 - **Phase 0** — IR, validator, type checker, verifier, transpiler, CLI, specs *(complete)*
-- **Phase 1** — Graph execution engine, temporal state types, visualization IDE
-- **Phase 2** — Pattern templates, certified stdlib, multi-graph composition
+- **Phase 1** — Execution engine, compact form, incremental builder, visualization *(complete)*
+- **Phase 2** — State types, templates, scopes, multi-agent collaboration, intent resolution, semantic diff *(complete)*
+- **Phase 3** — TBD

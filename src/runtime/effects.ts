@@ -22,7 +22,7 @@ export interface EffectReport {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function isNode(n: { id: string; hole?: boolean }): n is AetherNode {
-  return !("hole" in n && (n as any).hole === true);
+  return !("hole" in n && (n as any).hole === true) && !("intent" in n && (n as any).intent === true);
 }
 
 /**

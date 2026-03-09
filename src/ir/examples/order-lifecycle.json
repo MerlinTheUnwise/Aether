@@ -1,0 +1,168 @@
+{
+  "id": "order_lifecycle",
+  "version": 1,
+  "effects": ["database.write", "payment_gateway.write", "shipping.write", "email"],
+  "metadata": {
+    "description": "Order lifecycle with temporal state types demonstrating verified state machine transitions",
+    "safety_level": "high"
+  },
+  "state_types": [
+    {
+      "id": "OrderLifecycle",
+      "states": ["created", "paid", "shipped", "delivered", "cancelled", "refunded"],
+      "transitions": [
+        { "from": "created", "to": "paid", "when": "payment_confirmed" },
+        { "from": "created", "to": "cancelled", "when": "customer_cancelled" },
+        { "from": "paid", "to": "shipped", "when": "shipment_dispatched" },
+        { "from": "paid", "to": "refunded", "when": "refund_requested" },
+        { "from": "shipped", "to": "delivered", "when": "delivery_confirmed" },
+        { "from": "delivered", "to": "refunded", "when": "return_approved" }
+      ],
+      "invariants": {
+        "never": [
+          { "from": "cancelled", "to": "paid" },
+          { "from": "delivered", "to": "shipped" }
+        ],
+        "terminal": ["cancelled", "refunded"],
+        "initial": "created"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "create_order",
+      "in": {
+        "customer_id": { "type": "String", "domain": "commerce" },
+        "items": { "type": "List<Product>", "domain": "commerce" }
+      },
+      "out": {
+        "order_id": { "type": "String", "format": "uuid_v4", "domain": "commerce" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" }
+      },
+      "contract": {
+        "pre": ["customer_id.length > 0"],
+        "post": ["status == \"created\""]
+      },
+      "confidence": 0.99,
+      "effects": ["database.write"],
+      "recovery": {
+        "database_error": { "action": "retry", "params": { "count": 3, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "process_payment",
+      "in": {
+        "order_id": { "type": "String", "format": "uuid_v4", "domain": "commerce" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" },
+        "amount": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+      },
+      "out": {
+        "payment_id": { "type": "String", "format": "uuid_v4", "domain": "payment" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" }
+      },
+      "contract": {
+        "pre": ["amount > 0"],
+        "post": ["status == \"paid\""]
+      },
+      "confidence": 0.95,
+      "effects": ["payment_gateway.write", "database.write"],
+      "recovery": {
+        "payment_declined": { "action": "respond", "params": { "status": "declined", "body": "Payment was declined" } },
+        "gateway_timeout": { "action": "retry", "params": { "count": 2, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "ship_order",
+      "in": {
+        "order_id": { "type": "String", "format": "uuid_v4", "domain": "commerce" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" },
+        "payment_id": { "type": "String", "format": "uuid_v4", "domain": "payment" }
+      },
+      "out": {
+        "tracking_id": { "type": "String", "domain": "shipping" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" }
+      },
+      "contract": {
+        "pre": ["order_id.length > 0"],
+        "post": ["status == \"shipped\""]
+      },
+      "confidence": 0.92,
+      "effects": ["shipping.write", "database.write"],
+      "recovery": {
+        "shipping_unavailable": { "action": "escalate", "params": { "message": "No shipping carriers available" } }
+      }
+    },
+    {
+      "id": "confirm_delivery",
+      "in": {
+        "order_id": { "type": "String", "format": "uuid_v4", "domain": "commerce" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" },
+        "tracking_id": { "type": "String", "domain": "shipping" }
+      },
+      "out": {
+        "delivered_at": { "type": "String", "format": "iso8601" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" }
+      },
+      "contract": {
+        "pre": ["tracking_id.length > 0"],
+        "post": ["status == \"delivered\""]
+      },
+      "confidence": 0.90,
+      "effects": ["database.write", "email"],
+      "recovery": {
+        "delivery_failed": { "action": "retry", "params": { "count": 3, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "handle_cancellation",
+      "in": {
+        "order_id": { "type": "String", "format": "uuid_v4", "domain": "commerce" },
+        "reason": { "type": "String" }
+      },
+      "out": {
+        "cancelled_at": { "type": "String", "format": "iso8601" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" }
+      },
+      "contract": {
+        "pre": ["order_id.length > 0"],
+        "post": ["status == \"cancelled\""]
+      },
+      "confidence": 0.98,
+      "effects": ["database.write", "email"],
+      "recovery": {
+        "cancellation_error": { "action": "retry", "params": { "count": 2, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "process_refund",
+      "in": {
+        "order_id": { "type": "String", "format": "uuid_v4", "domain": "commerce" },
+        "payment_id": { "type": "String", "format": "uuid_v4", "domain": "payment" },
+        "reason": { "type": "String" }
+      },
+      "out": {
+        "refund_id": { "type": "String", "format": "uuid_v4", "domain": "payment" },
+        "status": { "type": "String", "domain": "commerce", "state_type": "OrderLifecycle" }
+      },
+      "contract": {
+        "pre": ["payment_id.length > 0"],
+        "post": ["status == \"refunded\""]
+      },
+      "confidence": 0.93,
+      "effects": ["payment_gateway.write", "database.write", "email"],
+      "recovery": {
+        "refund_failed": { "action": "escalate", "params": { "message": "Refund processing failed" } }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "create_order.order_id", "to": "process_payment.order_id" },
+    { "from": "create_order.status", "to": "process_payment.status" },
+    { "from": "process_payment.payment_id", "to": "ship_order.payment_id" },
+    { "from": "create_order.order_id", "to": "ship_order.order_id" },
+    { "from": "process_payment.status", "to": "ship_order.status" },
+    { "from": "create_order.order_id", "to": "confirm_delivery.order_id" },
+    { "from": "ship_order.status", "to": "confirm_delivery.status" },
+    { "from": "ship_order.tracking_id", "to": "confirm_delivery.tracking_id" }
+  ]
+}

@@ -5,7 +5,7 @@
  * Uses inline SVG — no external dependencies, works offline.
  */
 
-import type { AetherGraph, AetherNode, AetherHole, AetherEdge } from "../ir/validator.js";
+import type { AetherGraph, AetherNode, AetherHole, AetherEdge, IntentNode } from "../ir/validator.js";
 import type { ExecutionResult, ExecutionLogEntry } from "../runtime/executor.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ interface LayoutNode {
   height: number;
   wave: number;
   isHole: boolean;
-  node: AetherNode | AetherHole;
+  node: AetherNode | AetherHole | IntentNode;
   confidence: number;
   effects: string[];
   pure: boolean;
@@ -32,12 +32,16 @@ interface LayoutEdge {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function isNode(n: AetherNode | AetherHole): n is AetherNode {
-  return !("hole" in n && (n as any).hole === true);
+function isNode(n: AetherNode | AetherHole | IntentNode): n is AetherNode {
+  return !("hole" in n && (n as any).hole === true) && !("intent" in n && (n as any).intent === true);
 }
 
-function isHole(n: AetherNode | AetherHole): n is AetherHole {
+function isHole(n: AetherNode | AetherHole | IntentNode): n is AetherHole {
   return "hole" in n && (n as any).hole === true;
+}
+
+function isIntent(n: AetherNode | AetherHole | IntentNode): n is IntentNode {
+  return "intent" in n && (n as any).intent === true;
 }
 
 function parseEdgeRef(ref: string): { nodeId: string; portName: string } | null {
@@ -108,7 +112,7 @@ const MARGIN = 40;
 
 function computeLayout(graph: AetherGraph): LayoutNode[] {
   const waveMap = computeWaves(graph);
-  const waves = new Map<number, (AetherNode | AetherHole)[]>();
+  const waves = new Map<number, (AetherNode | AetherHole | IntentNode)[]>();
 
   for (const node of graph.nodes) {
     const w = waveMap.get(node.id) ?? 0;
@@ -127,7 +131,8 @@ function computeLayout(graph: AetherGraph): LayoutNode[] {
     for (let i = 0; i < nodesInWave.length; i++) {
       const n = nodesInWave[i];
       const hole = isHole(n);
-      const aNode = hole ? null : (n as AetherNode);
+      const intent = isIntent(n);
+      const aNode = (hole || intent) ? null : (n as AetherNode);
 
       layout.push({
         id: n.id,
@@ -138,10 +143,10 @@ function computeLayout(graph: AetherGraph): LayoutNode[] {
         wave: w,
         isHole: hole,
         node: n,
-        confidence: hole ? 0.5 : (aNode!.confidence ?? 0.9),
-        effects: hole ? (n as AetherHole).must_satisfy.effects ?? [] : aNode!.effects,
-        pure: hole ? true : (aNode!.pure ?? aNode!.effects.length === 0),
-        supervised: hole ? false : !!aNode!.supervised,
+        confidence: hole ? 0.5 : intent ? ((n as IntentNode).confidence ?? 0.9) : (aNode!.confidence ?? 0.9),
+        effects: hole ? (n as AetherHole).must_satisfy.effects ?? [] : intent ? ((n as IntentNode).effects ?? []) : aNode!.effects,
+        pure: hole ? true : intent ? ((n as IntentNode).effects ?? []).length === 0 : (aNode!.pure ?? aNode!.effects.length === 0),
+        supervised: hole ? false : intent ? false : !!aNode!.supervised,
       });
     }
   }

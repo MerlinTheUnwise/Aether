@@ -1,0 +1,49 @@
+{
+  "id": "validate-schema",
+  "description": "Validate a value against a schema. Returns valid flag and error list. If valid=true, value conforms; if valid=false, errors is non-empty.",
+  "interface": {
+    "in": {
+      "value": { "type": "Any" },
+      "schema": { "type": "Schema" }
+    },
+    "out": {
+      "valid": { "type": "Bool" },
+      "errors": { "type": "List<String>" }
+    }
+  },
+  "contracts": {
+    "pre": ["input.value != null", "input.schema != null"],
+    "post": [
+      "if output.valid == true then input.value conforms to input.schema",
+      "if output.valid == false then output.errors.length > 0"
+    ]
+  },
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "deterministic": true,
+  "nodes": [
+    {
+      "id": "validate_impl",
+      "in": {
+        "value": { "type": "Any" },
+        "schema": { "type": "Schema" }
+      },
+      "out": {
+        "valid": { "type": "Bool" },
+        "errors": { "type": "List<String>" }
+      },
+      "contract": {
+        "pre": ["input.value != null", "input.schema != null"],
+        "post": [
+          "if output.valid == true then input.value conforms to input.schema",
+          "if output.valid == false then output.errors.length > 0"
+        ]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": []
+}

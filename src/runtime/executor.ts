@@ -9,9 +9,10 @@
  * - Effect enforcement via EffectTracker integration
  */
 
-import type { AetherGraph, AetherNode, AetherEdge, TypeAnnotation } from "../ir/validator.js";
+import type { AetherGraph, AetherNode, AetherEdge, TypeAnnotation, StateType, Scope } from "../ir/validator.js";
 import { ConfidenceEngine } from "./confidence.js";
 import { EffectTracker } from "./effects.js";
+import { extractScope, computeScopeOrder } from "../compiler/scopes.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,20 @@ export interface ExecutionLogEntry {
   error?: string;
 }
 
+export interface StateTransitionEntry {
+  stateType: string;
+  from: string;
+  to: string;
+  node: string;
+  when: string;
+}
+
+export interface StateTracker {
+  currentStates: Map<string, string>;  // state_type_id → current_state
+  transitionLog: StateTransitionEntry[];
+  violations: string[];
+}
+
 export interface ExecutionResult {
   outputs: Record<string, any>;
   confidence: number;
@@ -45,6 +60,11 @@ export interface ExecutionResult {
   nodesSkipped: number;
   duration_ms: number;
   waves: number;
+  stateTransitions?: {
+    log: StateTransitionEntry[];
+    violations: string[];
+    finalStates: Record<string, string>;
+  };
 }
 
 export class ContractViolation extends Error {
@@ -74,7 +94,7 @@ export class EscalationError extends Error {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function isNode(n: { id: string; hole?: boolean }): n is AetherNode {
-  return !("hole" in n && (n as any).hole === true);
+  return !("hole" in n && (n as any).hole === true) && !("intent" in n && (n as any).intent === true);
 }
 
 function parseEdgeRef(ref: string): { nodeId: string; portName: string } | null {
@@ -454,6 +474,26 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
   const confidenceEngine = new ConfidenceEngine(context.graph, context.confidenceThreshold);
   const effectTracker = new EffectTracker(context.graph);
 
+  // State tracking setup
+  const stateTracker: StateTracker = {
+    currentStates: new Map(),
+    transitionLog: [],
+    violations: [],
+  };
+
+  // Build state type lookup
+  const stateTypeMap = new Map<string, StateType>();
+  const graphAny = context.graph as any;
+  if (graphAny.state_types && Array.isArray(graphAny.state_types)) {
+    for (const st of graphAny.state_types) {
+      stateTypeMap.set(st.id, st);
+      // Initialize to initial state if defined
+      if (st.invariants?.initial) {
+        stateTracker.currentStates.set(st.id, st.invariants.initial);
+      }
+    }
+  }
+
   // Compute waves
   const waves = computeWaves(context.graph);
 
@@ -496,6 +536,61 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
         effects: result.effects,
         error: result.error,
       });
+
+      // Track state transitions for state-typed output ports
+      if (stateTypeMap.size > 0 && !result.skipped) {
+        const node = nodeMap.get(result.nodeId);
+        if (node) {
+          for (const [portName, ann] of Object.entries(node.out)) {
+            if (ann.state_type) {
+              const stDef = stateTypeMap.get(ann.state_type);
+              if (!stDef) continue;
+
+              // Determine the new state from the output value
+              const outputVal = result.outputs[portName];
+              const newState = typeof outputVal === "string" ? outputVal : undefined;
+              if (!newState || !stDef.states.includes(newState)) continue;
+
+              const currentState = stateTracker.currentStates.get(ann.state_type);
+
+              if (currentState) {
+                // Check if transition is valid
+                const validTransition = stDef.transitions.some(
+                  t => t.from === currentState && t.to === newState
+                );
+                if (!validTransition && currentState !== newState) {
+                  stateTracker.violations.push(
+                    `Invalid transition in "${result.nodeId}": ${ann.state_type} ${currentState}→${newState}`
+                  );
+                }
+
+                // Find matching transition for 'when'
+                const matchingT = stDef.transitions.find(
+                  t => t.from === currentState && t.to === newState
+                );
+                stateTracker.transitionLog.push({
+                  stateType: ann.state_type,
+                  from: currentState,
+                  to: newState,
+                  node: result.nodeId,
+                  when: matchingT?.when ?? "unknown",
+                });
+              } else {
+                // First state assignment
+                stateTracker.transitionLog.push({
+                  stateType: ann.state_type,
+                  from: "(initial)",
+                  to: newState,
+                  node: result.nodeId,
+                  when: "initialization",
+                });
+              }
+
+              stateTracker.currentStates.set(ann.state_type, newState);
+            }
+          }
+        }
+      }
     }
   }
 
@@ -507,6 +602,13 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
 
   const totalDuration = performance.now() - totalStart;
 
+  // Build state transitions result
+  const stateTransitions = stateTypeMap.size > 0 ? {
+    log: stateTracker.transitionLog,
+    violations: stateTracker.violations,
+    finalStates: Object.fromEntries(stateTracker.currentStates),
+  } : undefined;
+
   return {
     outputs,
     confidence: confidenceEngine.getGraphConfidence(),
@@ -516,5 +618,142 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
     nodesSkipped,
     duration_ms: totalDuration,
     waves: waves.length,
+    stateTransitions,
+  };
+}
+
+// ─── Scope-Aware Execution ───────────────────────────────────────────────────
+
+export interface ScopeExecutionResult extends ExecutionResult {
+  scopeId: string;
+  boundaryOutputs: Record<string, any>;
+}
+
+function parseEdgeRefExec(ref: string): { nodeId: string; portName: string } | null {
+  const dot = ref.indexOf(".");
+  if (dot < 1 || dot === ref.length - 1) return null;
+  return { nodeId: ref.slice(0, dot), portName: ref.slice(dot + 1) };
+}
+
+export async function executeScope(
+  graph: AetherGraph,
+  scopeId: string,
+  boundaryInputs: Record<string, any>,
+  context: ExecutionContext
+): Promise<ScopeExecutionResult> {
+  const scopeView = extractScope(graph, scopeId);
+  const scope = scopeView.scope;
+  const scopeNodeIds = new Set(scope.nodes);
+
+  // Build inputs: graph-level inputs + boundary inputs
+  const mergedInputs = { ...context.inputs, ...boundaryInputs };
+
+  // Execute the scope's subgraph
+  const scopeContext: ExecutionContext = {
+    graph: scopeView.graph,
+    inputs: mergedInputs,
+    nodeImplementations: context.nodeImplementations,
+    confidenceThreshold: context.confidenceThreshold,
+    onOversightRequired: context.onOversightRequired,
+    onEffectExecuted: context.onEffectExecuted,
+  };
+
+  const result = await execute(scopeContext);
+
+  // Collect boundary outputs: values from scope's nodes that feed into other scopes
+  const boundaryOutputs: Record<string, any> = {};
+  for (const edge of scopeView.boundaryEdges) {
+    const from = parseEdgeRefExec(edge.from);
+    const to = parseEdgeRefExec(edge.to);
+    if (!from || !to) continue;
+    if (scopeNodeIds.has(from.nodeId) && !scopeNodeIds.has(to.nodeId)) {
+      // Output from this scope to another
+      const nodeOutputs = result.outputs[from.nodeId];
+      if (nodeOutputs && from.portName in nodeOutputs) {
+        boundaryOutputs[`${from.nodeId}.${from.portName}`] = nodeOutputs[from.portName];
+      }
+    }
+  }
+
+  return {
+    ...result,
+    scopeId,
+    boundaryOutputs,
+  };
+}
+
+export async function executeScopedGraph(context: ExecutionContext): Promise<ExecutionResult> {
+  const graph = context.graph;
+  const scopes = graph.scopes ?? [];
+
+  if (scopes.length === 0) {
+    return execute(context);
+  }
+
+  // Determine execution order
+  const scopeOrder = computeScopeOrder(graph);
+
+  const totalStart = performance.now();
+  const allLog: ExecutionLogEntry[] = [];
+  const allOutputs: Record<string, any> = {};
+  const allEffects: string[] = [];
+  let totalExecuted = 0;
+  let totalSkipped = 0;
+  let totalWaves = 0;
+  let minConfidence = 1;
+
+  // Track boundary outputs across scope executions
+  const boundaryValues: Record<string, any> = {};
+
+  // Build node-to-scope map and edge map for boundary resolution
+  const nodeToScope = new Map<string, string>();
+  for (const scope of scopes) {
+    for (const nodeId of scope.nodes) {
+      nodeToScope.set(nodeId, scope.id);
+    }
+  }
+
+  for (const scopeId of scopeOrder) {
+    // Gather boundary inputs for this scope from completed scopes
+    const boundaryInputs: Record<string, any> = {};
+    for (const edge of graph.edges) {
+      const from = parseEdgeRefExec(edge.from);
+      const to = parseEdgeRefExec(edge.to);
+      if (!from || !to) continue;
+
+      const fromScope = nodeToScope.get(from.nodeId);
+      const toScope = nodeToScope.get(to.nodeId);
+      if (fromScope !== scopeId && toScope === scopeId) {
+        const key = `${from.nodeId}.${from.portName}`;
+        if (key in boundaryValues) {
+          boundaryInputs[to.portName] = boundaryValues[key];
+        }
+      }
+    }
+
+    const scopeResult = await executeScope(graph, scopeId, boundaryInputs, context);
+
+    // Merge results
+    Object.assign(allOutputs, scopeResult.outputs);
+    allLog.push(...scopeResult.executionLog);
+    allEffects.push(...scopeResult.effectsPerformed);
+    totalExecuted += scopeResult.nodesExecuted;
+    totalSkipped += scopeResult.nodesSkipped;
+    totalWaves += scopeResult.waves;
+    if (scopeResult.confidence < minConfidence) minConfidence = scopeResult.confidence;
+
+    // Store boundary outputs for downstream scopes
+    Object.assign(boundaryValues, scopeResult.boundaryOutputs);
+  }
+
+  return {
+    outputs: allOutputs,
+    confidence: minConfidence,
+    executionLog: allLog,
+    effectsPerformed: allEffects,
+    nodesExecuted: totalExecuted,
+    nodesSkipped: totalSkipped,
+    duration_ms: performance.now() - totalStart,
+    waves: totalWaves,
   };
 }

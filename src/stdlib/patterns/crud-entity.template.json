@@ -1,0 +1,129 @@
+{
+  "id": "crud-entity",
+  "description": "CRUD operations for a typed entity with validation, existence checks, and storage effects",
+  "parameters": [
+    { "name": "Entity", "kind": "type" },
+    { "name": "IdType", "kind": "type" },
+    { "name": "storage_effect", "kind": "effect" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_input",
+      "in": {
+        "data": { "type": "$Entity" }
+      },
+      "out": {
+        "validated": { "type": "$Entity" }
+      },
+      "contract": {
+        "pre": ["input.data != null"],
+        "post": ["output.validated != null"]
+      },
+      "effects": [],
+      "pure": true
+    },
+    {
+      "id": "check_exists",
+      "in": {
+        "entity_id": { "type": "$IdType" }
+      },
+      "out": {
+        "exists": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.entity_id != null"],
+        "post": ["typeof output.exists == 'boolean'"]
+      },
+      "effects": ["$storage_effect"],
+      "recovery": {
+        "storage_failure": { "action": "retry", "params": { "max": 3, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "create_entity",
+      "in": {
+        "data": { "type": "$Entity" }
+      },
+      "out": {
+        "entity": { "type": "$Entity" },
+        "success": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.data != null"],
+        "post": ["output.success == true"]
+      },
+      "effects": ["$storage_effect"],
+      "recovery": {
+        "storage_failure": { "action": "retry", "params": { "max": 3, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "read_entity",
+      "in": {
+        "entity_id": { "type": "$IdType" }
+      },
+      "out": {
+        "entity": { "type": "$Entity" }
+      },
+      "contract": {
+        "pre": ["input.entity_id != null"],
+        "post": ["output.entity != null"]
+      },
+      "effects": ["$storage_effect"],
+      "recovery": {
+        "not_found": { "action": "respond", "params": { "status": 404 } }
+      }
+    },
+    {
+      "id": "update_entity",
+      "in": {
+        "entity_id": { "type": "$IdType" },
+        "data": { "type": "$Entity" }
+      },
+      "out": {
+        "entity": { "type": "$Entity" },
+        "success": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.entity_id != null", "input.data != null"],
+        "post": ["output.success == true"]
+      },
+      "effects": ["$storage_effect"],
+      "recovery": {
+        "not_found": { "action": "respond", "params": { "status": 404 } },
+        "storage_failure": { "action": "retry", "params": { "max": 3, "backoff": "exponential" } }
+      }
+    },
+    {
+      "id": "delete_entity",
+      "in": {
+        "entity_id": { "type": "$IdType" }
+      },
+      "out": {
+        "success": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.entity_id != null"],
+        "post": ["output.success == true"]
+      },
+      "effects": ["$storage_effect"],
+      "recovery": {
+        "not_found": { "action": "respond", "params": { "status": 404 } },
+        "storage_failure": { "action": "retry", "params": { "max": 3, "backoff": "exponential" } }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "validate_input.validated", "to": "create_entity.data" },
+    { "from": "check_exists.exists", "to": "update_entity.entity_id" },
+    { "from": "check_exists.exists", "to": "delete_entity.entity_id" }
+  ],
+  "exposed_inputs": {
+    "data": "validate_input.data",
+    "entity_id": "check_exists.entity_id"
+  },
+  "exposed_outputs": {
+    "entity": "read_entity.entity",
+    "success": "create_entity.success"
+  }
+}

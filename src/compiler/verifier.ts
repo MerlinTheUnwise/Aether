@@ -72,6 +72,14 @@ export interface VerificationResult {
   adversarial_checks: AdversarialResult[];
 }
 
+export interface StateTypeVerificationResult {
+  id: string;
+  states: number;
+  transitions: number;
+  neverInvariants: { checked: number; verified: number };
+  terminalInvariants: { checked: number; verified: number };
+}
+
 export interface GraphVerificationReport {
   graph_id: string;
   nodes_verified: number;
@@ -79,6 +87,7 @@ export interface GraphVerificationReport {
   nodes_unsupported: number;
   results: VerificationResult[];
   verification_percentage: number;
+  stateTypeResults: StateTypeVerificationResult[];
 }
 
 // ─── Z3 Initialization ───────────────────────────────────────────────────────
@@ -675,6 +684,104 @@ export async function verifyNode(
   };
 }
 
+// ─── State Type Verification ─────────────────────────────────────────────────
+
+interface StateTypeDef {
+  id: string;
+  states: string[];
+  transitions: Array<{ from: string; to: string; when: string }>;
+  invariants?: {
+    never?: Array<{ from: string; to: string }>;
+    terminal?: string[];
+    initial?: string;
+  };
+}
+
+async function verifyStateType(
+  st: StateTypeDef,
+  z3: Z3Instance
+): Promise<StateTypeVerificationResult> {
+  const { Context } = z3;
+  const ctx = new Context(`state_type_${st.id}`);
+
+  const result: StateTypeVerificationResult = {
+    id: st.id,
+    states: st.states.length,
+    transitions: st.transitions.length,
+    neverInvariants: { checked: 0, verified: 0 },
+    terminalInvariants: { checked: 0, verified: 0 },
+  };
+
+  // Encode states as integer constants
+  const stateIndex = new Map<string, number>();
+  st.states.forEach((s, i) => stateIndex.set(s, i));
+
+  const fromVar = ctx.Int.const("from_state");
+  const toVar = ctx.Int.const("to_state");
+
+  // Build transition constraint: OR of all valid (from, to) pairs
+  const transitionPairs = st.transitions.map(t => {
+    const fromIdx = stateIndex.get(t.from)!;
+    const toIdx = stateIndex.get(t.to)!;
+    return ctx.And(
+      ctx.Eq(fromVar, ctx.Int.val(fromIdx)),
+      ctx.Eq(toVar, ctx.Int.val(toIdx))
+    );
+  });
+
+  const validTransition = transitionPairs.length > 0
+    ? (transitionPairs.length === 1 ? transitionPairs[0] : ctx.Or(...transitionPairs))
+    : ctx.Bool.val(false);
+
+  // Verify never-invariants
+  if (st.invariants?.never) {
+    for (const nev of st.invariants.never) {
+      result.neverInvariants.checked++;
+      const fromIdx = stateIndex.get(nev.from);
+      const toIdx = stateIndex.get(nev.to);
+      if (fromIdx === undefined || toIdx === undefined) continue;
+
+      try {
+        const solver = new ctx.Solver();
+        // Assert: valid transition AND from=nev.from AND to=nev.to
+        solver.add(validTransition);
+        solver.add(ctx.Eq(fromVar, ctx.Int.val(fromIdx)));
+        solver.add(ctx.Eq(toVar, ctx.Int.val(toIdx)));
+        const check = await solver.check();
+        if (check === "unsat") {
+          result.neverInvariants.verified++;
+        }
+      } catch {
+        // Skip on error
+      }
+    }
+  }
+
+  // Verify terminal invariants
+  if (st.invariants?.terminal) {
+    for (const term of st.invariants.terminal) {
+      result.terminalInvariants.checked++;
+      const termIdx = stateIndex.get(term);
+      if (termIdx === undefined) continue;
+
+      try {
+        const solver = new ctx.Solver();
+        // Assert: valid transition AND from=terminal_state
+        solver.add(validTransition);
+        solver.add(ctx.Eq(fromVar, ctx.Int.val(termIdx)));
+        const check = await solver.check();
+        if (check === "unsat") {
+          result.terminalInvariants.verified++;
+        }
+      } catch {
+        // Skip on error
+      }
+    }
+  }
+
+  return result;
+}
+
 // ─── Graph Verification ──────────────────────────────────────────────────────
 
 export async function verifyGraph(graph: AetherGraph): Promise<GraphVerificationReport> {
@@ -682,6 +789,11 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
   const results: VerificationResult[] = [];
 
   for (const node of graph.nodes) {
+    // Skip holes and intent nodes — they have no contracts to verify
+    if (("hole" in node && (node as any).hole === true) ||
+        ("intent" in node && (node as any).intent === true)) {
+      continue;
+    }
     const result = await verifyNode(node, z3);
     results.push(result);
   }
@@ -708,6 +820,16 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
   const total = nodes_verified + nodes_failed;
   const verification_percentage = total > 0 ? Math.round((nodes_verified / total) * 100) : 100;
 
+  // Verify state types
+  const stateTypeResults: StateTypeVerificationResult[] = [];
+  const graphAny = graph as any;
+  if (graphAny.state_types && Array.isArray(graphAny.state_types)) {
+    for (const st of graphAny.state_types) {
+      const stResult = await verifyStateType(st, z3);
+      stateTypeResults.push(stResult);
+    }
+  }
+
   return {
     graph_id: graph.id,
     nodes_verified,
@@ -715,6 +837,7 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
     nodes_unsupported,
     results,
     verification_percentage,
+    stateTypeResults,
   };
 }
 

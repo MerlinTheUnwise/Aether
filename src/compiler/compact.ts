@@ -69,6 +69,22 @@ interface AetherHole {
   };
 }
 
+interface IntentNode {
+  id: string;
+  intent: true;
+  ensure: string[];
+  in: Record<string, TypeAnnotation>;
+  out: Record<string, TypeAnnotation>;
+  effects?: string[];
+  constraints?: {
+    time_complexity?: string;
+    space_complexity?: string;
+    latency_ms?: number;
+    deterministic?: boolean;
+  };
+  confidence?: number;
+}
+
 interface AetherEdge {
   from: string;
   to: string;
@@ -80,7 +96,7 @@ interface AetherGraph {
   effects: string[];
   partial?: boolean;
   sla?: { latency_ms?: number; availability?: number };
-  nodes: (AetherNode | AetherHole)[];
+  nodes: (AetherNode | AetherHole | IntentNode)[];
   edges: AetherEdge[];
   metadata?: {
     description?: string;
@@ -115,8 +131,12 @@ const ANNOTATION_EXPAND: Record<string, { key: string; value: string }> = {
 
 // ─── Emitter: Structured → Compact ───────────────────────────────────────────
 
-function isHole(node: AetherNode | AetherHole): node is AetherHole {
+function isHole(node: AetherNode | AetherHole | IntentNode): node is AetherHole {
   return "hole" in node && (node as AetherHole).hole === true;
+}
+
+function isIntent(node: AetherNode | AetherHole | IntentNode): node is IntentNode {
+  return "intent" in node && (node as IntentNode).intent === true;
 }
 
 function compactType(type: string): string {
@@ -214,6 +234,30 @@ export function emitCompact(graph: AetherGraph): string {
         if (c.post && c.post.length > 0) {
           lines.push(`  C[post:${c.post.join(" && ")}]`);
         }
+      }
+    } else if (isIntent(node)) {
+      const inPorts = emitPorts(node.in);
+      const outPorts = emitPorts(node.out);
+      let intentLine = `I:${node.id} (${inPorts})->(${outPorts})`;
+      if (node.effects && node.effects.length > 0) {
+        intentLine += ` eff[${node.effects.join(",")}]`;
+      }
+      if (node.confidence !== undefined) intentLine += ` c:${node.confidence}`;
+      lines.push(intentLine);
+
+      // Ensure clauses
+      for (const clause of node.ensure) {
+        lines.push(`  E[${clause}]`);
+      }
+
+      // Constraints
+      if (node.constraints) {
+        const parts: string[] = [];
+        if (node.constraints.time_complexity) parts.push(`time:${node.constraints.time_complexity}`);
+        if (node.constraints.space_complexity) parts.push(`space:${node.constraints.space_complexity}`);
+        if (node.constraints.deterministic !== undefined) parts.push(`det:${node.constraints.deterministic}`);
+        if (node.constraints.latency_ms !== undefined) parts.push(`lat:${node.constraints.latency_ms}`);
+        if (parts.length > 0) lines.push(`  K[${parts.join(",")}]`);
       }
     } else {
       const inPorts = emitPorts(node.in);
@@ -467,6 +511,16 @@ export function parseCompact(source: string): AetherGraph {
 
   let currentNode: AetherNode | null = null;
   let currentHole: AetherHole | null = null;
+  let currentIntent: IntentNode | null = null;
+
+  function flushCurrent(): void {
+    if (currentNode) (graph.nodes as any[]).push(currentNode);
+    if (currentHole) (graph.nodes as any[]).push(currentHole);
+    if (currentIntent) (graph.nodes as any[]).push(currentIntent);
+    currentNode = null;
+    currentHole = null;
+    currentIntent = null;
+  }
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -485,29 +539,33 @@ export function parseCompact(source: string): AetherGraph {
 
     // Node
     if (trimmed.startsWith("N:")) {
-      if (currentNode) (graph.nodes as (AetherNode | AetherHole)[]).push(currentNode);
-      currentHole = null;
+      flushCurrent();
       currentNode = parseNodeLine(trimmed);
       continue;
     }
 
     // Hole
     if (trimmed.startsWith("H:")) {
-      if (currentNode) { (graph.nodes as (AetherNode | AetherHole)[]).push(currentNode); currentNode = null; }
-      if (currentHole) (graph.nodes as (AetherNode | AetherHole)[]).push(currentHole);
+      flushCurrent();
       currentHole = parseHoleLine(trimmed);
+      continue;
+    }
+
+    // Intent Node
+    if (trimmed.startsWith("I:")) {
+      flushCurrent();
+      currentIntent = parseIntentLine(trimmed);
       continue;
     }
 
     // Edge
     if (trimmed.startsWith("E:")) {
-      if (currentNode) { (graph.nodes as (AetherNode | AetherHole)[]).push(currentNode); currentNode = null; }
-      if (currentHole) { (graph.nodes as (AetherNode | AetherHole)[]).push(currentHole); currentHole = null; }
+      flushCurrent();
       parseEdgeLine(trimmed, graph);
       continue;
     }
 
-    // Indented blocks (belong to current node/hole)
+    // Indented blocks (belong to current node/hole/intent)
     if (trimmed.startsWith("C[")) {
       if (currentNode) parseContractBlock(trimmed, currentNode.contract);
       else if (currentHole) {
@@ -531,11 +589,35 @@ export function parseCompact(source: string): AetherGraph {
       if (currentNode) parseSupervisedBlock(trimmed, currentNode);
       continue;
     }
+
+    // Intent ensure clause
+    if (trimmed.startsWith("E[") && trimmed.endsWith("]") && !trimmed.startsWith("E:")) {
+      if (currentIntent) {
+        currentIntent.ensure.push(trimmed.slice(2, -1));
+      }
+      continue;
+    }
+
+    // Intent constraints
+    if (trimmed.startsWith("K[") && trimmed.endsWith("]")) {
+      if (currentIntent) {
+        const content = trimmed.slice(2, -1);
+        const parts = content.split(",");
+        if (!currentIntent.constraints) currentIntent.constraints = {};
+        for (const part of parts) {
+          const [key, val] = part.split(":");
+          if (key === "time") currentIntent.constraints.time_complexity = val;
+          if (key === "space") currentIntent.constraints.space_complexity = val;
+          if (key === "det") currentIntent.constraints.deterministic = val === "true";
+          if (key === "lat") currentIntent.constraints.latency_ms = parseFloat(val);
+        }
+      }
+      continue;
+    }
   }
 
-  // Push last node/hole
-  if (currentNode) (graph.nodes as (AetherNode | AetherHole)[]).push(currentNode);
-  if (currentHole) (graph.nodes as (AetherNode | AetherHole)[]).push(currentHole);
+  // Push last node/hole/intent
+  flushCurrent();
 
   return graph as AetherGraph;
 }
@@ -676,6 +758,50 @@ function parseHoleLine(line: string): AetherHole {
   }
 
   return hole;
+}
+
+function parseIntentLine(line: string): IntentNode {
+  // I:node_id (port:Type,...)->(port:Type,...) eff[effects] c:0.99
+  const afterI = line.slice(2).trim();
+  const idEnd = afterI.search(/[\s(]/);
+  const id = idEnd > 0 ? afterI.slice(0, idEnd) : afterI;
+  const rest = idEnd > 0 ? afterI.slice(idEnd).trim() : "";
+
+  const arrowIdx = rest.indexOf(")->(");
+  let inPorts: Record<string, TypeAnnotation> = {};
+  let outPorts: Record<string, TypeAnnotation> = {};
+  let afterPorts = "";
+
+  if (arrowIdx >= 0) {
+    const inStr = rest.slice(1, arrowIdx);
+    const afterArrow = rest.slice(arrowIdx + 4);
+    const outEnd = afterArrow.indexOf(")");
+    const outStr = outEnd >= 0 ? afterArrow.slice(0, outEnd) : afterArrow;
+    afterPorts = outEnd >= 0 ? afterArrow.slice(outEnd + 1).trim() : "";
+
+    inPorts = parsePorts(inStr);
+    outPorts = parsePorts(outStr);
+  }
+
+  const intent: IntentNode = {
+    id,
+    intent: true,
+    ensure: [],
+    in: inPorts,
+    out: outPorts,
+  };
+
+  const tokens = afterPorts.split(/\s+/).filter(Boolean);
+  for (const token of tokens) {
+    if (token.startsWith("eff[") && token.endsWith("]")) {
+      const effs = token.slice(4, -1);
+      intent.effects = effs ? effs.split(",") : [];
+    } else if (token.startsWith("c:")) {
+      intent.confidence = parseFloat(token.slice(2));
+    }
+  }
+
+  return intent;
 }
 
 function parseEdgeLine(line: string, graph: Partial<AetherGraph>): void {

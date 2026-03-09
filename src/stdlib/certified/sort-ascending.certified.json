@@ -1,0 +1,47 @@
+{
+  "id": "sort-ascending",
+  "description": "Sort a collection in ascending order. Output is a permutation of input with preserved length.",
+  "interface": {
+    "in": {
+      "collection": { "type": "Collection<T>" }
+    },
+    "out": {
+      "sorted": { "type": "Collection<T>" }
+    }
+  },
+  "contracts": {
+    "pre": ["input.collection != null"],
+    "post": [
+      "output.sorted.length == input.collection.length",
+      "output.sorted is sorted",
+      "output.sorted is permutation of input.collection"
+    ]
+  },
+  "complexity": {
+    "time": "O(n log n)",
+    "space": "O(n)"
+  },
+  "deterministic": true,
+  "nodes": [
+    {
+      "id": "sort_impl",
+      "in": {
+        "collection": { "type": "Collection<T>" }
+      },
+      "out": {
+        "sorted": { "type": "Collection<T>" }
+      },
+      "contract": {
+        "pre": ["input.collection != null"],
+        "post": [
+          "output.sorted.length == input.collection.length",
+          "output.sorted is sorted",
+          "output.sorted is permutation of input.collection"
+        ]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": []
+}

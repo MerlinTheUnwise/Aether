@@ -1,0 +1,47 @@
+{
+  "id": "filter-predicate",
+  "description": "Filter a collection by a predicate. All output elements satisfy the predicate, output is a subset of input.",
+  "interface": {
+    "in": {
+      "collection": { "type": "Collection<T>" },
+      "predicate": { "type": "Predicate<T>" }
+    },
+    "out": {
+      "filtered": { "type": "Collection<T>" }
+    }
+  },
+  "contracts": {
+    "pre": ["input.collection != null", "input.predicate != null"],
+    "post": [
+      "all elements in output.filtered satisfy predicate",
+      "output.filtered is subset of input.collection"
+    ]
+  },
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(n)"
+  },
+  "deterministic": true,
+  "nodes": [
+    {
+      "id": "filter_impl",
+      "in": {
+        "collection": { "type": "Collection<T>" },
+        "predicate": { "type": "Predicate<T>" }
+      },
+      "out": {
+        "filtered": { "type": "Collection<T>" }
+      },
+      "contract": {
+        "pre": ["input.collection != null", "input.predicate != null"],
+        "post": [
+          "all elements in output.filtered satisfy predicate",
+          "output.filtered is subset of input.collection"
+        ]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": []
+}

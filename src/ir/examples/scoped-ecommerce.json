@@ -1,0 +1,265 @@
+{
+  "id": "scoped_ecommerce",
+  "version": 1,
+  "effects": ["database.read", "database.write", "cache.read", "cache.write", "payment_gateway.write", "email", "analytics.write"],
+  "metadata": {
+    "description": "E-commerce checkout pipeline with 3 scopes: catalog, checkout, post-purchase"
+  },
+  "nodes": [
+    {
+      "id": "load_cart",
+      "in": {
+        "session_id": { "type": "String", "domain": "session" }
+      },
+      "out": {
+        "cart_items": { "type": "List<CartItem>", "domain": "catalog" },
+        "cart_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+      },
+      "contract": {
+        "post": ["cart_total >= 0"]
+      },
+      "effects": ["database.read", "cache.read"],
+      "recovery": {
+        "cache_miss": { "action": "retry", "params": { "count": 2 } }
+      }
+    },
+    {
+      "id": "validate_stock",
+      "in": {
+        "cart_items": { "type": "List<CartItem>", "domain": "catalog" }
+      },
+      "out": {
+        "in_stock_items": { "type": "List<CartItem>", "domain": "catalog" },
+        "all_available": { "type": "Bool" }
+      },
+      "contract": {
+        "post": ["all_available == true"]
+      },
+      "effects": ["database.read"],
+      "recovery": {
+        "partial_stock": {
+          "action": "respond",
+          "params": { "status": 409, "body": "some items out of stock" }
+        }
+      }
+    },
+    {
+      "id": "apply_discounts",
+      "in": {
+        "in_stock_items": { "type": "List<CartItem>", "domain": "catalog" },
+        "cart_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+      },
+      "out": {
+        "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" },
+        "discount_applied": { "type": "String", "domain": "catalog" }
+      },
+      "contract": {
+        "pre": ["cart_total >= 0"],
+        "post": ["final_total >= 0", "final_total <= cart_total"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "reserve_inventory",
+      "in": {
+        "in_stock_items": { "type": "List<CartItem>", "domain": "catalog" }
+      },
+      "out": {
+        "reservation_id": { "type": "String", "domain": "inventory" },
+        "reserved_items": { "type": "List<CartItem>", "domain": "inventory" }
+      },
+      "contract": {
+        "post": ["reservation_id.length > 0"]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "reservation_failed": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        }
+      }
+    },
+    {
+      "id": "charge_payment",
+      "in": {
+        "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" },
+        "reservation_id": { "type": "String", "domain": "inventory" }
+      },
+      "out": {
+        "transaction_id": { "type": "String", "domain": "payment" },
+        "charge_status": { "type": "String", "domain": "payment" }
+      },
+      "contract": {
+        "pre": ["final_total > 0", "reservation_id.length > 0"],
+        "post": ["charge_status == success", "transaction_id.length > 0"]
+      },
+      "effects": ["payment_gateway.write"],
+      "recovery": {
+        "payment_declined": {
+          "action": "respond",
+          "params": { "status": 402, "body": "payment failed" }
+        },
+        "gateway_timeout": {
+          "action": "retry",
+          "params": { "count": 2, "backoff": "exponential" }
+        }
+      }
+    },
+    {
+      "id": "create_order_record",
+      "in": {
+        "transaction_id": { "type": "String", "domain": "payment" },
+        "reserved_items": { "type": "List<CartItem>", "domain": "inventory" },
+        "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+      },
+      "out": {
+        "order_id": { "type": "String", "domain": "order" },
+        "order_status": { "type": "String", "domain": "order" }
+      },
+      "contract": {
+        "pre": ["transaction_id.length > 0"],
+        "post": ["order_id.length > 0"]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "db_error": {
+          "action": "retry",
+          "params": { "count": 3 }
+        }
+      }
+    },
+    {
+      "id": "send_receipt",
+      "in": {
+        "order_id": { "type": "String", "domain": "order" },
+        "transaction_id": { "type": "String", "domain": "payment" }
+      },
+      "out": {
+        "receipt_sent": { "type": "Bool" }
+      },
+      "contract": {
+        "post": ["receipt_sent == true"]
+      },
+      "effects": ["email"],
+      "recovery": {
+        "email_failed": {
+          "action": "report",
+          "params": { "channel": "email-failures" }
+        }
+      }
+    },
+    {
+      "id": "track_analytics",
+      "in": {
+        "order_id": { "type": "String", "domain": "order" },
+        "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+      },
+      "out": {
+        "event_logged": { "type": "Bool" }
+      },
+      "contract": {
+        "post": ["event_logged == true"]
+      },
+      "effects": ["analytics.write"],
+      "recovery": {
+        "analytics_down": {
+          "action": "report",
+          "params": { "channel": "analytics-failures" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "load_cart.cart_items", "to": "validate_stock.cart_items" },
+    { "from": "load_cart.cart_total", "to": "apply_discounts.cart_total" },
+    { "from": "validate_stock.in_stock_items", "to": "apply_discounts.in_stock_items" },
+    { "from": "validate_stock.in_stock_items", "to": "reserve_inventory.in_stock_items" },
+    { "from": "apply_discounts.final_total", "to": "charge_payment.final_total" },
+    { "from": "reserve_inventory.reservation_id", "to": "charge_payment.reservation_id" },
+    { "from": "charge_payment.transaction_id", "to": "create_order_record.transaction_id" },
+    { "from": "reserve_inventory.reserved_items", "to": "create_order_record.reserved_items" },
+    { "from": "apply_discounts.final_total", "to": "create_order_record.final_total" },
+    { "from": "create_order_record.order_id", "to": "send_receipt.order_id" },
+    { "from": "charge_payment.transaction_id", "to": "send_receipt.transaction_id" },
+    { "from": "create_order_record.order_id", "to": "track_analytics.order_id" },
+    { "from": "apply_discounts.final_total", "to": "track_analytics.final_total" }
+  ],
+  "scopes": [
+    {
+      "id": "catalog",
+      "description": "Cart loading, stock validation, and pricing",
+      "nodes": ["load_cart", "validate_stock", "apply_discounts"],
+      "boundary_contracts": {
+        "provides": [
+          {
+            "name": "catalog_output",
+            "in": {},
+            "out": {
+              "in_stock_items": { "type": "List<CartItem>", "domain": "catalog" },
+              "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+            },
+            "effects": ["database.read", "cache.read"],
+            "confidence": 0.95
+          }
+        ],
+        "requires": []
+      }
+    },
+    {
+      "id": "checkout",
+      "description": "Inventory reservation, payment, and order creation",
+      "nodes": ["reserve_inventory", "charge_payment", "create_order_record"],
+      "boundary_contracts": {
+        "requires": [
+          {
+            "name": "catalog_output",
+            "in": {
+              "in_stock_items": { "type": "List<CartItem>", "domain": "catalog" },
+              "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+            },
+            "out": {},
+            "confidence": 0.9
+          }
+        ],
+        "provides": [
+          {
+            "name": "checkout_output",
+            "in": {},
+            "out": {
+              "order_id": { "type": "String", "domain": "order" },
+              "transaction_id": { "type": "String", "domain": "payment" },
+              "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+            },
+            "effects": ["database.write", "payment_gateway.write"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "post_purchase",
+      "description": "Receipt and analytics tracking",
+      "nodes": ["send_receipt", "track_analytics"],
+      "boundary_contracts": {
+        "requires": [
+          {
+            "name": "catalog_output",
+            "in": {
+              "final_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
+            },
+            "out": {}
+          },
+          {
+            "name": "checkout_output",
+            "in": {
+              "order_id": { "type": "String", "domain": "order" },
+              "transaction_id": { "type": "String", "domain": "payment" }
+            },
+            "out": {}
+          }
+        ],
+        "provides": []
+      }
+    }
+  ]
+}

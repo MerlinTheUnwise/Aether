@@ -54,8 +54,8 @@ You are an AETHER compiler. You translate natural language program descriptions 
     "nodes": {
       "type": "array",
       "minItems": 1,
-      "items": { "oneOf": [{ "$ref": "#/definitions/AetherNode" }, { "$ref": "#/definitions/AetherHole" }] },
-      "description": "All computation nodes (and holes) in the graph"
+      "items": { "oneOf": [{ "$ref": "#/definitions/AetherNode" }, { "$ref": "#/definitions/AetherHole" }, { "$ref": "#/definitions/IntentNode" }] },
+      "description": "All computation nodes (holes and intents) in the graph"
     },
     "edges": {
       "type": "array",
@@ -80,6 +80,26 @@ You are an AETHER compiler. You translate natural language program descriptions 
           }
         }
       }
+    },
+    "state_types": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/StateType" },
+      "default": []
+    },
+    "templates": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/AetherTemplate" },
+      "default": []
+    },
+    "template_instances": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/AetherTemplateInstance" },
+      "default": []
+    },
+    "scopes": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/Scope" },
+      "default": []
     }
   },
   "definitions": {
@@ -124,6 +144,41 @@ You are an AETHER compiler. You translate natural language program descriptions 
         "constraint": {
           "type": "string",
           "description": "Arbitrary constraint expression, e.g. '> 0.7'"
+        },
+        "state_type": {
+          "type": "string",
+          "description": "References a declared StateType id, e.g. 'OrderLifecycle'"
+        }
+      }
+    },
+    "StateType": {
+      "type": "object",
+      "required": ["id", "states", "transitions"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "states": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": { "type": "string" },
+              "to": { "type": "string" },
+              "when": { "type": "string" }
+            },
+            "required": ["from", "to", "when"],
+            "additionalProperties": false
+          }
+        },
+        "invariants": {
+          "type": "object",
+          "properties": {
+            "never": { "type": "array", "items": { "type": "object", "properties": { "from": { "type": "string" }, "to": { "type": "string" } }, "required": ["from", "to"], "additionalProperties": false } },
+            "terminal": { "type": "array", "items": { "type": "string" } },
+            "initial": { "type": "string" }
+          },
+          "additionalProperties": false
         }
       }
     },
@@ -283,6 +338,97 @@ You are an AETHER compiler. You translate natural language program descriptions 
           "description": "Destination port reference: 'node_id.port_name' (must be an in port)"
         }
       }
+    },
+    "AetherTemplate": {
+      "type": "object",
+      "required": ["id", "parameters", "nodes", "edges"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "kind": { "enum": ["type", "value", "effect", "node_id"] },
+              "constraint": { "type": "string" }
+            },
+            "required": ["name", "kind"],
+            "additionalProperties": false
+          }
+        },
+        "nodes": { "type": "array", "items": { "$ref": "#/definitions/AetherNode" } },
+        "edges": { "type": "array", "items": { "$ref": "#/definitions/AetherEdge" } },
+        "exposed_inputs": { "type": "object", "additionalProperties": { "type": "string" } },
+        "exposed_outputs": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "IntentNode": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "intent": { "const": true },
+        "ensure": { "type": "array", "items": { "type": "string" }, "description": "Properties that must be true of the output" },
+        "in": { "type": "object", "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" } },
+        "out": { "type": "object", "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" } },
+        "effects": { "type": "array", "items": { "type": "string" } },
+        "constraints": {
+          "type": "object",
+          "properties": {
+            "time_complexity": { "type": "string" },
+            "space_complexity": { "type": "string" },
+            "latency_ms": { "type": "number" },
+            "deterministic": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        "confidence": { "type": "number" }
+      },
+      "required": ["id", "intent", "ensure", "in", "out"],
+      "additionalProperties": false
+    },
+    "AetherTemplateInstance": {
+      "type": "object",
+      "required": ["id", "template", "bindings"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "template": { "type": "string" },
+        "bindings": { "type": "object", "additionalProperties": {} }
+      }
+    },
+    "BoundaryContract": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "in": { "type": "object", "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" } },
+        "out": { "type": "object", "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" } },
+        "contract": { "$ref": "#/definitions/Contract" },
+        "effects": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "type": "number" }
+      },
+      "required": ["name", "in", "out"],
+      "additionalProperties": false
+    },
+    "Scope": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "nodes": { "type": "array", "items": { "type": "string" } },
+        "boundary_contracts": {
+          "type": "object",
+          "properties": {
+            "requires": { "type": "array", "items": { "$ref": "#/definitions/BoundaryContract" } },
+            "provides": { "type": "array", "items": { "$ref": "#/definitions/BoundaryContract" } }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": ["id", "nodes"],
+      "additionalProperties": false
     }
   }
 }

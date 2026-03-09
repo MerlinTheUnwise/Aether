@@ -1,0 +1,45 @@
+{
+  "id": "aggregate-sum",
+  "description": "Sum numeric values from a collection using an accessor. Result equals the sum of accessor(element) for all elements.",
+  "interface": {
+    "in": {
+      "collection": { "type": "Collection<T>" },
+      "accessor": { "type": "Accessor<T, Numeric>" }
+    },
+    "out": {
+      "total": { "type": "Numeric" }
+    }
+  },
+  "contracts": {
+    "pre": ["input.collection != null", "input.accessor != null"],
+    "post": [
+      "output.total == sum of accessor(element) for all elements in input.collection"
+    ]
+  },
+  "complexity": {
+    "time": "O(n)",
+    "space": "O(1)"
+  },
+  "deterministic": true,
+  "nodes": [
+    {
+      "id": "sum_impl",
+      "in": {
+        "collection": { "type": "Collection<T>" },
+        "accessor": { "type": "Accessor<T, Numeric>" }
+      },
+      "out": {
+        "total": { "type": "Numeric" }
+      },
+      "contract": {
+        "pre": ["input.collection != null", "input.accessor != null"],
+        "post": [
+          "output.total == sum of accessor(element) for all elements in input.collection"
+        ]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": []
+}

@@ -51,13 +51,13 @@ interface AetherGraph {
 
 export interface CheckError {
   edge: string;
-  code: "DIMENSION_MISMATCH" | "DOMAIN_MISMATCH" | "SENSITIVITY_VIOLATION" | "BASE_TYPE_MISMATCH";
+  code: "DIMENSION_MISMATCH" | "DOMAIN_MISMATCH" | "SENSITIVITY_VIOLATION" | "BASE_TYPE_MISMATCH" | "STATE_TYPE_MISMATCH";
   message: string;
 }
 
 export interface CheckWarning {
   edge: string;
-  code: "UNIT_MISMATCH" | "CONSTRAINT_WARNING";
+  code: "UNIT_MISMATCH" | "CONSTRAINT_WARNING" | "STATE_TYPE_LOST";
   message: string;
   suggestion?: string;
 }
@@ -160,6 +160,31 @@ function checkEdge(
       edge: edgeLabel,
       code: "SENSITIVITY_VIOLATION",
       message: `sensitivity violation: pii data flowing to public scope`,
+    });
+  }
+
+  // State type check
+  const fromStateType = (fromAnnotation as any).state_type as string | undefined;
+  const toStateType = (toAnnotation as any).state_type as string | undefined;
+  if (fromStateType && toStateType) {
+    if (fromStateType !== toStateType) {
+      errors.push({
+        edge: edgeLabel,
+        code: "STATE_TYPE_MISMATCH",
+        message: `state type mismatch: ${fromStateType} → ${toStateType}`,
+      });
+    }
+  } else if (fromStateType && !toStateType) {
+    warnings.push({
+      edge: edgeLabel,
+      code: "STATE_TYPE_LOST",
+      message: `state type information lost: source has state_type "${fromStateType}" but destination does not`,
+    });
+  } else if (!fromStateType && toStateType) {
+    warnings.push({
+      edge: edgeLabel,
+      code: "STATE_TYPE_LOST",
+      message: `state type information lost: destination has state_type "${toStateType}" but source does not`,
     });
   }
 

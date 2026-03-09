@@ -1,0 +1,61 @@
+{
+  "id": "retry-with-fallback",
+  "description": "Retry a primary operation N times with exponential backoff, then fall back to an alternative",
+  "parameters": [
+    { "name": "T_in", "kind": "type" },
+    { "name": "T_out", "kind": "type" },
+    { "name": "max_retries", "kind": "value", "constraint": "> 0" },
+    { "name": "primary_effect", "kind": "effect" },
+    { "name": "fallback_node", "kind": "node_id" }
+  ],
+  "nodes": [
+    {
+      "id": "attempt_primary",
+      "in": {
+        "request": { "type": "$T_in" }
+      },
+      "out": {
+        "result": { "type": "$T_out" }
+      },
+      "contract": {
+        "pre": ["input.request != null"],
+        "post": ["output.result != null"]
+      },
+      "effects": ["$primary_effect"],
+      "recovery": {
+        "primary_failure": {
+          "action": "retry",
+          "params": { "max": "$max_retries", "backoff": "exponential" }
+        },
+        "exhausted": {
+          "action": "fallback",
+          "params": { "target": "$fallback_node" }
+        }
+      }
+    },
+    {
+      "id": "fallback",
+      "in": {
+        "request": { "type": "$T_in" }
+      },
+      "out": {
+        "result": { "type": "$T_out" }
+      },
+      "contract": {
+        "pre": ["input.request != null"],
+        "post": ["output.result != null"]
+      },
+      "effects": [],
+      "pure": true
+    }
+  ],
+  "edges": [
+    { "from": "attempt_primary.result", "to": "fallback.request" }
+  ],
+  "exposed_inputs": {
+    "request": "attempt_primary.request"
+  },
+  "exposed_outputs": {
+    "result": "fallback.result"
+  }
+}

@@ -193,5 +193,113 @@
     { "from": "process_payment.transaction_id", "to": "create_shipment.transaction_id" },
     { "from": "process_payment.transaction_id", "to": "send_confirmation.transaction_id" },
     { "from": "create_shipment.tracking_number", "to": "send_confirmation.tracking_number" }
+  ],
+  "scopes": [
+    {
+      "id": "order",
+      "description": "Order validation and inventory management",
+      "nodes": ["validate_order", "check_inventory"],
+      "boundary_contracts": {
+        "provides": [
+          {
+            "name": "order_data",
+            "in": {},
+            "out": {
+              "total_amount": { "type": "Float64", "dimension": "currency", "unit": "USD" },
+              "available": { "type": "Bool" },
+              "reserved_items": { "type": "List<OrderItem>", "domain": "inventory" }
+            },
+            "effects": ["database.read", "database.write"],
+            "confidence": 0.95
+          }
+        ],
+        "requires": []
+      }
+    },
+    {
+      "id": "payment",
+      "description": "Payment processing",
+      "nodes": ["process_payment"],
+      "boundary_contracts": {
+        "requires": [
+          {
+            "name": "order_data",
+            "in": {
+              "total_amount": { "type": "Float64", "dimension": "currency", "unit": "USD" },
+              "available": { "type": "Bool" }
+            },
+            "out": {},
+            "confidence": 0.9
+          }
+        ],
+        "provides": [
+          {
+            "name": "payment_result",
+            "in": {},
+            "out": {
+              "transaction_id": { "type": "String", "domain": "payment" }
+            },
+            "effects": ["payment_gateway.write"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "fulfillment",
+      "description": "Shipment creation",
+      "nodes": ["create_shipment"],
+      "boundary_contracts": {
+        "requires": [
+          {
+            "name": "order_data",
+            "in": {
+              "reserved_items": { "type": "List<OrderItem>", "domain": "inventory" }
+            },
+            "out": {}
+          },
+          {
+            "name": "payment_result",
+            "in": {
+              "transaction_id": { "type": "String", "domain": "payment" }
+            },
+            "out": {}
+          }
+        ],
+        "provides": [
+          {
+            "name": "shipment_result",
+            "in": {},
+            "out": {
+              "tracking_number": { "type": "String", "domain": "fulfillment" }
+            },
+            "effects": ["shipping.write", "database.write"]
+          }
+        ]
+      }
+    },
+    {
+      "id": "notification",
+      "description": "Customer notification",
+      "nodes": ["send_confirmation"],
+      "boundary_contracts": {
+        "requires": [
+          {
+            "name": "payment_result",
+            "in": {
+              "transaction_id": { "type": "String", "domain": "payment" }
+            },
+            "out": {}
+          },
+          {
+            "name": "shipment_result",
+            "in": {
+              "tracking_number": { "type": "String", "domain": "fulfillment" }
+            },
+            "out": {}
+          }
+        ],
+        "provides": []
+      }
+    }
   ]
 }

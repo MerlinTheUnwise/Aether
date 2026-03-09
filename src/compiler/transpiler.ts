@@ -333,9 +333,13 @@ function generateRecoveryWrapper(node: AetherNode): string | null {
 // ─── Main Transpiler ──────────────────────────────────────────────────────────
 
 export function transpileGraph(graph: AetherGraph): string {
-  const waves = computeWaves(graph.nodes, graph.edges);
+  const concreteNodes = graph.nodes.filter(n =>
+    !("hole" in n && (n as any).hole === true) &&
+    !("intent" in n && (n as any).intent === true)
+  ) as AetherNode[];
+  const waves = computeWaves(concreteNodes, graph.edges);
   const nodeMap = new Map<string, AetherNode>();
-  for (const node of graph.nodes) {
+  for (const node of concreteNodes) {
     nodeMap.set(node.id, node);
   }
 
@@ -372,6 +376,9 @@ export function transpileGraph(graph: AetherGraph): string {
 
   // Node functions
   for (const node of graph.nodes) {
+    // Skip holes and intent nodes
+    if (("hole" in node && (node as any).hole === true) ||
+        ("intent" in node && (node as any).intent === true)) continue;
     lines.push(generateNodeFunction(node));
     lines.push("");
 

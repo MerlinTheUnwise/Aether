@@ -1,0 +1,92 @@
+{
+  "id": "confidence-cascade",
+  "description": "Confidence cascading: primary assessment feeds secondary verification, gate requires threshold",
+  "parameters": [
+    { "name": "InputType", "kind": "type" },
+    { "name": "OutputType", "kind": "type" },
+    { "name": "threshold", "kind": "value", "constraint": "> 0" }
+  ],
+  "nodes": [
+    {
+      "id": "primary_assessment",
+      "in": {
+        "data": { "type": "$InputType" }
+      },
+      "out": {
+        "result": { "type": "$OutputType" },
+        "confidence_score": { "type": "Float" }
+      },
+      "contract": {
+        "pre": ["input.data != null"],
+        "post": ["output.result != null", "output.confidence_score >= 0", "output.confidence_score <= 1"]
+      },
+      "confidence": 0.8,
+      "adversarial_check": {
+        "break_if": ["output.confidence_score < 0", "output.confidence_score > 1"]
+      },
+      "effects": [],
+      "pure": true
+    },
+    {
+      "id": "secondary_verification",
+      "in": {
+        "data": { "type": "$InputType" },
+        "primary_result": { "type": "$OutputType" }
+      },
+      "out": {
+        "result": { "type": "$OutputType" },
+        "confidence_score": { "type": "Float" }
+      },
+      "contract": {
+        "pre": ["input.data != null", "input.primary_result != null"],
+        "post": ["output.result != null", "output.confidence_score >= 0", "output.confidence_score <= 1"]
+      },
+      "confidence": 0.8,
+      "adversarial_check": {
+        "break_if": ["output.confidence_score < 0", "output.confidence_score > 1"]
+      },
+      "effects": [],
+      "pure": true
+    },
+    {
+      "id": "human_review_gate",
+      "in": {
+        "primary_result": { "type": "$OutputType" },
+        "secondary_result": { "type": "$OutputType" },
+        "primary_confidence": { "type": "Float" },
+        "secondary_confidence": { "type": "Float" }
+      },
+      "out": {
+        "final_result": { "type": "$OutputType" },
+        "needs_review": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["input.primary_result != null", "input.secondary_result != null"],
+        "post": ["output.final_result != null"]
+      },
+      "confidence": 0.75,
+      "adversarial_check": {
+        "break_if": ["output.final_result == null"]
+      },
+      "effects": [],
+      "pure": true,
+      "recovery": {
+        "below_threshold": { "action": "escalate", "params": { "reason": "confidence below threshold" } }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "primary_assessment.result", "to": "secondary_verification.primary_result" },
+    { "from": "primary_assessment.result", "to": "human_review_gate.primary_result" },
+    { "from": "primary_assessment.confidence_score", "to": "human_review_gate.primary_confidence" },
+    { "from": "secondary_verification.result", "to": "human_review_gate.secondary_result" },
+    { "from": "secondary_verification.confidence_score", "to": "human_review_gate.secondary_confidence" }
+  ],
+  "exposed_inputs": {
+    "data": "primary_assessment.data"
+  },
+  "exposed_outputs": {
+    "final_result": "human_review_gate.final_result",
+    "needs_review": "human_review_gate.needs_review"
+  }
+}
