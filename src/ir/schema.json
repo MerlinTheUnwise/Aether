@@ -1,0 +1,254 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://aether-lang.dev/ir/schema.json",
+  "title": "AetherGraph",
+  "description": "AETHER-IR: JSON DAG intermediate representation for AETHER programs",
+  "type": "object",
+  "required": ["id", "version", "effects", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique identifier for this graph"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version, must be >= 1"
+    },
+    "effects": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Graph-level declared effects (union of all node effects)"
+    },
+    "sla": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "latency_ms": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "availability": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/AetherNode" },
+      "description": "All computation nodes in the graph"
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/AetherEdge" },
+      "description": "Directed data-flow connections between node ports"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "safety_level": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "human_oversight": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["required_when"],
+          "properties": {
+            "required_when": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "TypeAnnotation": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Type name, e.g. 'String', 'Bool', 'List<Product>'"
+        },
+        "domain": {
+          "type": "string",
+          "description": "Semantic domain, e.g. 'authentication', 'commerce', 'ml'"
+        },
+        "unit": {
+          "type": "string",
+          "description": "Physical unit, e.g. 'kelvin', 'USD', 'ms'"
+        },
+        "dimension": {
+          "type": "string",
+          "description": "Physical dimension, e.g. 'thermodynamic_temperature', 'currency'"
+        },
+        "format": {
+          "type": "string",
+          "description": "Data format constraint, e.g. 'email', 'uuid_v4', 'jwt'"
+        },
+        "sensitivity": {
+          "type": "string",
+          "enum": ["pii", "public", "internal"],
+          "description": "Data sensitivity classification"
+        },
+        "range": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[min, max] inclusive range constraint"
+        },
+        "constraint": {
+          "type": "string",
+          "description": "Arbitrary constraint expression, e.g. '> 0.7'"
+        }
+      }
+    },
+    "Contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pre": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Precondition expressions"
+        },
+        "post": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Postcondition expressions"
+        },
+        "invariants": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Invariants that must hold throughout execution"
+        }
+      }
+    },
+    "AdversarialCheck": {
+      "type": "object",
+      "required": ["break_if"],
+      "additionalProperties": false,
+      "properties": {
+        "break_if": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Conditions that are true when the implementation is WRONG"
+        }
+      }
+    },
+    "RecoveryAction": {
+      "type": "object",
+      "required": ["action"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Recovery strategy: 'retry', 'escalate', 'fallback', 'respond', 'assume', etc."
+        },
+        "params": {
+          "type": "object",
+          "description": "Strategy-specific parameters",
+          "additionalProperties": true
+        }
+      }
+    },
+    "SupervisedBlock": {
+      "type": "object",
+      "required": ["reason"],
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Explanation of why this node is unverified"
+        },
+        "review_status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        }
+      }
+    },
+    "AetherNode": {
+      "type": "object",
+      "required": ["id", "in", "out", "contract", "effects"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique node identifier within this graph"
+        },
+        "in": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" },
+          "description": "Named input ports with type annotations"
+        },
+        "out": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/TypeAnnotation" },
+          "description": "Named output ports with type annotations"
+        },
+        "contract": {
+          "$ref": "#/definitions/Contract",
+          "description": "Correctness contract for this node"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Certainty annotation 0.0–1.0; < 0.85 requires adversarial_check"
+        },
+        "adversarial_check": {
+          "$ref": "#/definitions/AdversarialCheck",
+          "description": "Required when confidence < 0.85; properties true when implementation is WRONG"
+        },
+        "effects": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Declared side effects, e.g. ['database.read', 'network']"
+        },
+        "pure": {
+          "type": "boolean",
+          "description": "Shorthand for effects: [] — node has no side effects"
+        },
+        "recovery": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/RecoveryAction" },
+          "description": "Named recovery strategies keyed by failure mode"
+        },
+        "supervised": {
+          "$ref": "#/definitions/SupervisedBlock",
+          "description": "Marks this node as explicitly unverified, tracked in verification score"
+        }
+      }
+    },
+    "AetherEdge": {
+      "type": "object",
+      "required": ["from", "to"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^[^.]+\\.[^.]+$",
+          "description": "Source port reference: 'node_id.port_name' (must be an out port)"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^[^.]+\\.[^.]+$",
+          "description": "Destination port reference: 'node_id.port_name' (must be an in port)"
+        }
+      }
+    }
+  }
+}

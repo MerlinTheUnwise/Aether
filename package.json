@@ -1,0 +1,27 @@
+{
+  "name": "aether",
+  "version": "0.1.0",
+  "description": "AETHER — AI-native programming language (graph IR toolchain)",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "z3-solver": "^4.13.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  },
+  "ts-node": {
+    "esm": true,
+    "experimentalSpecifierResolution": "node"
+  }
+}

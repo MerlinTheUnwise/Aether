@@ -1,0 +1,109 @@
+{
+  "id": "user_registration",
+  "version": 1,
+  "effects": ["database.read", "database.write"],
+  "nodes": [
+    {
+      "id": "validate_email",
+      "in": {
+        "email": {
+          "type": "String",
+          "format": "email",
+          "sensitivity": "pii"
+        }
+      },
+      "out": {
+        "valid": {
+          "type": "Bool"
+        },
+        "normalized": {
+          "type": "String",
+          "format": "email",
+          "domain": "authentication",
+          "sensitivity": "pii"
+        }
+      },
+      "contract": {
+        "pre": ["email.length > 0"],
+        "post": [
+          "normalized.is_lowercase",
+          "normalized.is_trimmed"
+        ]
+      },
+      "pure": true,
+      "confidence": 0.99,
+      "effects": []
+    },
+    {
+      "id": "check_uniqueness",
+      "in": {
+        "email": {
+          "type": "String",
+          "format": "email",
+          "domain": "authentication",
+          "sensitivity": "pii"
+        }
+      },
+      "out": {
+        "unique": {
+          "type": "Bool"
+        }
+      },
+      "contract": {
+        "post": ["unique <=> !exists(users, email)"]
+      },
+      "effects": ["database.read"],
+      "recovery": {
+        "db_timeout": {
+          "action": "retry",
+          "params": { "attempts": 3, "backoff": "exponential" }
+        },
+        "db_error": {
+          "action": "fallback",
+          "params": { "assume_unique": false }
+        }
+      }
+    },
+    {
+      "id": "create_user",
+      "in": {
+        "email": {
+          "type": "String",
+          "format": "email",
+          "domain": "authentication",
+          "sensitivity": "pii"
+        },
+        "unique": {
+          "type": "Bool",
+          "constraint": "== true"
+        }
+      },
+      "out": {
+        "user": {
+          "type": "User",
+          "domain": "authentication",
+          "sensitivity": "pii"
+        }
+      },
+      "contract": {
+        "pre": ["unique == true"],
+        "post": [
+          "user.email == email",
+          "user.status == active"
+        ]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "write_fail": {
+          "action": "escalate",
+          "params": { "message": "user creation failed", "max_retries": 2 }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "validate_email.normalized", "to": "check_uniqueness.email" },
+    { "from": "validate_email.normalized", "to": "create_user.email" },
+    { "from": "check_uniqueness.unique",   "to": "create_user.unique" }
+  ]
+}

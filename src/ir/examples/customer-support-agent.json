@@ -1,0 +1,112 @@
+{
+  "id": "customer_support_agent",
+  "version": 1,
+  "effects": ["database", "email", "ticketing"],
+  "metadata": {
+    "description": "AI customer support agent with authority limits and human oversight",
+    "safety_level": "high",
+    "human_oversight": {
+      "required_when": "confidence < 0.7"
+    }
+  },
+  "nodes": [
+    {
+      "id": "decide_action",
+      "in": {
+        "intent": {
+          "type": "SupportIntent",
+          "domain": "customer_support"
+        },
+        "urgency": {
+          "type": "Urgency",
+          "domain": "customer_support"
+        }
+      },
+      "out": {
+        "action": {
+          "type": "SupportAction",
+          "domain": "customer_support"
+        },
+        "confidence_score": {
+          "type": "Float64",
+          "range": [0.0, 1.0]
+        }
+      },
+      "contract": {
+        "post": [
+          "action in allowed_actions(intent)",
+          "action.risk_level <= agent_authority_level"
+        ],
+        "invariants": [
+          "never(action modifies billing without human_approval)",
+          "never(action deletes user_data)"
+        ]
+      },
+      "confidence": 0.75,
+      "adversarial_check": {
+        "break_if": [
+          "action.risk_level > agent_authority_level",
+          "action modifies billing",
+          "action deletes user_data"
+        ]
+      },
+      "effects": ["database"],
+      "recovery": {
+        "unknown_intent": {
+          "action": "escalate",
+          "params": {
+            "message": "escalate_to_human",
+            "preserve_context": true
+          }
+        },
+        "low_confidence": {
+          "action": "escalate",
+          "params": {
+            "strategy": "request_clarification",
+            "max_attempts": 2,
+            "then": "escalate_to_human"
+          }
+        }
+      }
+    },
+    {
+      "id": "execute_with_guard",
+      "in": {
+        "action": {
+          "type": "SupportAction",
+          "domain": "customer_support"
+        },
+        "confidence_score": {
+          "type": "Float64",
+          "range": [0.0, 1.0],
+          "constraint": "> 0.7"
+        }
+      },
+      "out": {
+        "result": {
+          "type": "ActionResult",
+          "domain": "customer_support"
+        }
+      },
+      "contract": {
+        "pre": ["confidence_score > 0.7"],
+        "post": ["result.status in [success, partial, requires_followup]"]
+      },
+      "effects": ["database", "email", "ticketing"],
+      "recovery": {
+        "execution_failed": {
+          "action": "escalate",
+          "params": { "message": "action execution failed", "preserve_context": true }
+        },
+        "permission_denied": {
+          "action": "escalate",
+          "params": { "message": "agent exceeded authority", "alert_level": "high" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "decide_action.action",           "to": "execute_with_guard.action" },
+    { "from": "decide_action.confidence_score", "to": "execute_with_guard.confidence_score" }
+  ]
+}

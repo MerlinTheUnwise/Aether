@@ -1,0 +1,133 @@
+{
+  "id": "get_product_recommendations",
+  "version": 2,
+  "effects": ["database.read", "cache.read_write", "ml_model.infer"],
+  "sla": {
+    "latency_ms": 200,
+    "availability": 99.9
+  },
+  "nodes": [
+    {
+      "id": "authenticate",
+      "in": {
+        "token": {
+          "type": "String",
+          "format": "jwt",
+          "sensitivity": "internal"
+        }
+      },
+      "out": {
+        "user": {
+          "type": "AuthenticatedUser",
+          "domain": "authentication",
+          "sensitivity": "pii"
+        }
+      },
+      "contract": {
+        "pre": ["token.length > 0"],
+        "post": ["user.id != null", "user.authenticated == true"]
+      },
+      "effects": ["database.read"],
+      "recovery": {
+        "invalid_token": {
+          "action": "respond",
+          "params": { "status": 401, "message": "unauthorized" }
+        },
+        "expired": {
+          "action": "respond",
+          "params": { "status": 401, "message": "token expired" }
+        }
+      }
+    },
+    {
+      "id": "fetch_history",
+      "in": {
+        "user": {
+          "type": "AuthenticatedUser",
+          "domain": "authentication",
+          "sensitivity": "pii"
+        }
+      },
+      "out": {
+        "purchases": {
+          "type": "List<Product>",
+          "domain": "commerce"
+        },
+        "views": {
+          "type": "List<Product>",
+          "domain": "commerce"
+        }
+      },
+      "contract": {
+        "post": [
+          "purchases is_subset_of all_products",
+          "views is_subset_of all_products"
+        ]
+      },
+      "effects": ["database.read", "cache.read_write"],
+      "recovery": {
+        "cache_miss": {
+          "action": "fallback",
+          "params": { "strategy": "database_fallback" }
+        },
+        "db_timeout": {
+          "action": "respond",
+          "params": {
+            "strategy": "cached_recommendations",
+            "confidence": 0.6
+          }
+        }
+      }
+    },
+    {
+      "id": "generate_recommendations",
+      "in": {
+        "purchases": {
+          "type": "List<Product>",
+          "domain": "commerce"
+        },
+        "views": {
+          "type": "List<Product>",
+          "domain": "commerce"
+        }
+      },
+      "out": {
+        "recommended": {
+          "type": "List<Product>",
+          "domain": "commerce",
+          "constraint": "size in 10..20"
+        }
+      },
+      "contract": {
+        "post": [
+          "forall(p, recommended, p not_in purchases)",
+          "recommended.is_distinct",
+          "recommended.size >= 10 && recommended.size <= 20"
+        ]
+      },
+      "confidence": 0.85,
+      "adversarial_check": {
+        "break_if": [
+          "intersection(recommended, purchases) != empty",
+          "recommended.has_duplicates"
+        ]
+      },
+      "effects": ["ml_model.infer"],
+      "recovery": {
+        "model_timeout": {
+          "action": "fallback",
+          "params": { "strategy": "popular_products", "confidence": 0.5 }
+        },
+        "model_error": {
+          "action": "escalate",
+          "params": { "message": "recommendation model unavailable" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "authenticate.user",         "to": "fetch_history.user" },
+    { "from": "fetch_history.purchases",   "to": "generate_recommendations.purchases" },
+    { "from": "fetch_history.views",       "to": "generate_recommendations.views" }
+  ]
+}
