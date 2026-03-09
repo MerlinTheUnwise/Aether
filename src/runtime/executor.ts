@@ -13,6 +13,8 @@ import type { AetherGraph, AetherNode, AetherEdge, TypeAnnotation, StateType, Sc
 import { ConfidenceEngine } from "./confidence.js";
 import { EffectTracker } from "./effects.js";
 import { extractScope, computeScopeOrder } from "../compiler/scopes.js";
+import type { ExecutionProfiler } from "./profiler.js";
+import type { JITCompiler } from "./jit.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +27,12 @@ export interface ExecutionContext {
   confidenceThreshold: number;
   onOversightRequired?: (node: string, confidence: number, context: any) => Promise<any>;
   onEffectExecuted?: (node: string, effect: string, detail: any) => void;
+  jit?: {
+    compiler: JITCompiler;
+    profiler: ExecutionProfiler;
+    autoCompile: boolean;
+    compilationThreshold: number;
+  };
 }
 
 export interface ExecutionLogEntry {
@@ -503,11 +511,76 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
     if (isNode(n)) nodeMap.set(n.id, n);
   }
 
+  // ─── JIT: Check for compiled subgraphs ─────────────────────────────────
+  const jitCompiledNodes = new Set<string>();
+  if (context.jit?.compiler) {
+    const compiler = context.jit.compiler;
+    // Check all cached compilations for subgraphs of this graph
+    const allNodeIds = [...nodeMap.keys()];
+
+    // Try to find cached compilations covering nodes in this graph
+    for (const nodeId of allNodeIds) {
+      if (jitCompiledNodes.has(nodeId)) continue;
+
+      // Check if this node is part of a cached compilation
+      const cached = findCachedCompilation(compiler, nodeId, allNodeIds);
+      if (cached) {
+        // Execute the compiled function
+        const jitStart = performance.now();
+        try {
+          const jitResult = await cached.fn(
+            context.inputs,
+            context.nodeImplementations,
+            {
+              confidenceThreshold: context.confidenceThreshold,
+              onOversight: context.onOversightRequired,
+              onEffect: context.onEffectExecuted,
+            }
+          );
+
+          // Store JIT results in state and log
+          for (const [jitNodeId, outputs] of Object.entries(jitResult.outputs)) {
+            state.set(jitNodeId, outputs as Record<string, any>);
+            jitCompiledNodes.add(jitNodeId);
+            nodesExecuted++;
+          }
+
+          allEffects.push(...jitResult.effects);
+
+          const jitDuration = performance.now() - jitStart;
+          for (const jitNodeId of cached.sourceNodes) {
+            if (nodeMap.has(jitNodeId)) {
+              log.push({
+                nodeId: jitNodeId,
+                wave: 0, // JIT flattens waves
+                duration_ms: jitDuration / cached.sourceNodes.length,
+                confidence: jitResult.confidence,
+                skipped: false,
+                effects: [],
+              });
+            }
+          }
+        } catch {
+          // JIT execution failed — fall through to interpreter
+        }
+      }
+    }
+  }
+
+  // ─── Set up profiler ───────────────────────────────────────────────────
+  const profiler = context.jit?.profiler;
+  if (profiler) {
+    profiler.setGraph(context.graph);
+  }
+
   // Execute wave by wave
   for (const wave of waves) {
     const waveNodes = wave.nodeIds
+      .filter(id => !jitCompiledNodes.has(id))
       .map(id => nodeMap.get(id))
       .filter((n): n is AetherNode => n !== undefined);
+
+    if (waveNodes.length === 0) continue;
 
     // Execute all nodes in wave in parallel
     const results = await Promise.all(
@@ -535,6 +608,15 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
         skipped: result.skipped,
         effects: result.effects,
         error: result.error,
+      });
+
+      // Record in profiler
+      profiler?.recordNodeExecution({
+        nodeId: result.nodeId,
+        duration_ms: result.duration_ms,
+        wave: wave.level,
+        confidence: result.confidence,
+        recoveryTriggered: !!result.error,
       });
 
       // Track state transitions for state-typed output ports
@@ -609,7 +691,7 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
     finalStates: Object.fromEntries(stateTracker.currentStates),
   } : undefined;
 
-  return {
+  const result: ExecutionResult = {
     outputs,
     confidence: confidenceEngine.getGraphConfidence(),
     executionLog: log,
@@ -620,6 +702,41 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
     waves: waves.length,
     stateTransitions,
   };
+
+  // Record in profiler
+  profiler?.recordGraphExecution(result);
+
+  // ─── JIT: Auto-compile recommendations ────────────────────────────────
+  if (context.jit?.autoCompile && context.jit.profiler && context.jit.compiler) {
+    const recs = context.jit.profiler.getRecommendations();
+    for (const rec of recs) {
+      if (!context.jit.compiler.getCached(rec.subgraph)) {
+        context.jit.compiler.compile(context.graph, rec.subgraph);
+      }
+    }
+  }
+
+  return result;
+}
+
+/** Find a cached JIT compilation that covers a given node */
+function findCachedCompilation(
+  compiler: JITCompiler,
+  nodeId: string,
+  allNodeIds: string[]
+): { fn: any; sourceNodes: string[] } | null {
+  // Check stats first — if no compilations, skip
+  const stats = compiler.getStats();
+  if (stats.cached === 0) return null;
+
+  // Try to find a cached compilation containing this node
+  // We check by trying all possible subsets that include this node
+  // In practice, compilations are stored by node set, so we check getCached
+  // with increasingly larger sets around this node
+  const cached = compiler.getCached(allNodeIds);
+  if (cached && cached.sourceNodes.includes(nodeId)) return cached;
+
+  return null;
 }
 
 // ─── Scope-Aware Execution ───────────────────────────────────────────────────

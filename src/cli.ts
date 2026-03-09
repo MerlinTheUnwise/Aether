@@ -45,7 +45,7 @@ function loadGraph(filePath: string): AetherGraph {
 
 function printUsage(): void {
   console.log(`
-AETHER CLI — Phase 1 Toolchain
+AETHER CLI — Toolchain
 
 Usage: npx tsx src/cli.ts <command> <path-to-json> [options]
 
@@ -67,6 +67,23 @@ Commands:
   collaborate <path>             Simulate multi-agent collaboration on scoped graph
   resolve <path>                 Resolve intent nodes against certified library
   diff <path-v1> <path-v2>      Semantic diff between two graph versions
+  profile <path> [--runs <N>]   Profile graph execution and show hot paths
+  jit <path> [--runs <N>] [--threshold <T>]  JIT compile and benchmark
+  dashboard <path> [--output <p>] [--open] [--execute] [--optimize] [--proofs]
+                                   Generate verification dashboard HTML
+  export-proofs <path> [--output <p.lean>]  Export Lean 4 proof certificates
+  dashboard-diff <path-v1> <path-v2> [--output <p>] [--open]
+                                   Diff two graph versions as HTML report
+
+Registry:
+  registry init                  Initialize local registry at ~/.aether/registry
+  registry list                  List all packages with verification status
+  registry info <package-name>   Show package details, versions, dependencies
+  registry check <pkg> <v1> <v2> Check version compatibility
+  publish <path> [--name <n>] [--version <v>] [--description <d>]
+                                   Publish a graph as a package
+  install <package-name> [--version <v>]  Install a package
+  search <query>                 Search registry by keyword
   help                           Show this message
 `.trim());
 }
@@ -289,6 +306,30 @@ async function cmdReport(filePath: string, outputDir: string): Promise<ReportRes
     }
   } catch {
     // Intent resolution is optional in report
+  }
+
+  // 3.7. Optimization Suggestions
+  try {
+    const { GraphOptimizer } = await import("./compiler/optimizer.js");
+    const optimizer = new GraphOptimizer();
+    const optSuggestions = optimizer.analyze(graph as any);
+    if (optSuggestions.length > 0) {
+      const autoCount = optSuggestions.filter(s => s.autoApplicable).length;
+      console.log(`Optimizations:  ${optSuggestions.length} suggestion(s) (${autoCount} auto-applicable)`);
+    }
+  } catch {
+    // Optimization analysis is optional in report
+  }
+
+  // 3.8. Proof Export Summary
+  try {
+    const { generateProofExport } = await import("./proofs/generate.js");
+    const proofExport = generateProofExport(graph as any, verifyReport);
+    const m = proofExport.metadata;
+    const sketched = m.theoremsGenerated - m.fullyProved - m.sorryCount;
+    console.log(`Proofs:         ${m.theoremsGenerated} theorems (${m.fullyProved} proved, ${sketched >= 0 ? sketched : 0} sketched, ${m.sorryCount} obligations)`);
+  } catch {
+    // Proof export is optional in report
   }
 
   // 4. Execute (stub mode)
@@ -1174,6 +1215,253 @@ async function cmdExpand(filePath: string): Promise<void> {
   console.log(JSON.stringify(graph, null, 2));
 }
 
+// ─── Optimize Command ─────────────────────────────────────────────────────────
+
+async function cmdOptimize(filePath: string, applyOpt: boolean, profilePath?: string): Promise<void> {
+  const { GraphOptimizer } = await import("./compiler/optimizer.js");
+  const graph = loadGraph(filePath);
+
+  const sep = "═══════════════════════════════════════════════════";
+
+  // Load profile if provided
+  let profile: any = undefined;
+  if (profilePath) {
+    const { ExecutionProfiler } = await import("./runtime/profiler.js");
+    const profileData = readFileSync(profilePath, "utf-8");
+    const profiler = ExecutionProfiler.import(profileData);
+    profile = profiler.analyze();
+  }
+
+  const optimizer = new GraphOptimizer();
+  const suggestions = optimizer.analyze(graph as any, profile);
+
+  console.log(sep);
+  console.log(`AETHER Optimization Report: ${graph.id} (v${graph.version})`);
+  console.log(sep);
+  console.log(`Suggestions: ${suggestions.length} found`);
+  console.log("");
+
+  for (const s of suggestions) {
+    console.log(`${s.priority.toUpperCase()}: ${s.type}`);
+    console.log(`  Nodes: [${s.affectedNodes.join(", ")}]`);
+    console.log(`  ${s.description}`);
+    console.log(`  Impact: ${s.estimatedImpact}`);
+    console.log(`  Auto-applicable: ${s.autoApplicable ? "✓" : "✗"}`);
+    console.log("");
+  }
+
+  if (applyOpt) {
+    const result = optimizer.applyAll(graph as any);
+    console.log("Applied optimizations:");
+    console.log(`  Applied: ${result.applied.length}`);
+    console.log(`  Skipped: ${result.skipped.length}`);
+
+    if (result.applied.length > 0) {
+      // Validate the optimized graph
+      const valResult = validateGraph(result.graph);
+      console.log(`  Validation: ${valResult.valid ? "✓ valid" : "✗ invalid"}`);
+
+      // Save optimized graph
+      const outPath = filePath.replace(/\.json$/, "_optimized.json");
+      fsWriteFileSync(outPath, JSON.stringify(result.graph, null, 2), "utf-8");
+      console.log(`  Saved: ${outPath}`);
+
+      // Before/after comparison
+      const origNodes = (graph as any).nodes.length;
+      const optNodes = result.graph.nodes.length;
+      const origEdges = (graph as any).edges.length;
+      const optEdges = result.graph.edges.length;
+      console.log(`  Before: ${origNodes} nodes, ${origEdges} edges`);
+      console.log(`  After:  ${optNodes} nodes, ${optEdges} edges`);
+    }
+  }
+
+  console.log(sep);
+}
+
+// ─── Profile Command ──────────────────────────────────────────────────────────
+
+async function cmdProfile(filePath: string, runs: number): Promise<void> {
+  const { execute } = await import("./runtime/executor.js");
+  const { ExecutionProfiler } = await import("./runtime/profiler.js");
+  const graph = loadGraph(filePath);
+
+  const profiler = new ExecutionProfiler(graph.id);
+  profiler.setGraph(graph as any);
+
+  const sep = "═══════════════════════════════════════════════════";
+  const thin = "───────────────────────────────────────────────────";
+
+  console.log(sep);
+  console.log(`AETHER Profile: ${graph.id} (v${graph.version})`);
+  console.log(sep);
+
+  let totalTime = 0;
+  for (let i = 0; i < runs; i++) {
+    const result = await execute({
+      graph: graph as any,
+      inputs: {},
+      nodeImplementations: new Map(),
+      confidenceThreshold: 0.7,
+      jit: {
+        compiler: undefined as any, // no compiler for profile-only
+        profiler,
+        autoCompile: false,
+        compilationThreshold: runs,
+      },
+    });
+    totalTime += result.duration_ms;
+  }
+
+  const avgTime = totalTime / runs;
+  console.log(`Profiling:      ${runs} executions, avg ${avgTime.toFixed(1)}ms`);
+  console.log("");
+
+  const profile = profiler.analyze({ minExecutions: Math.min(runs, 10), minNodes: 2 });
+
+  if (profile.hotPaths.length > 0) {
+    console.log("Hot Paths:");
+    for (const path of profile.hotPaths) {
+      console.log(`  [${path.nodes.join(" → ")}]`);
+      console.log(`    executions: ${path.executionCount}, avg: ${path.avgTotalTime_ms.toFixed(1)}ms, ${path.wave_count} waves`);
+    }
+    console.log("");
+  }
+
+  if (profile.recommendations.length > 0) {
+    console.log("Recommendations:");
+    for (const rec of profile.recommendations) {
+      console.log(`  [${rec.subgraph.join(", ")}]`);
+      console.log(`    ${rec.priority.toUpperCase()} — ${rec.reason}`);
+      console.log(`    ${rec.estimatedSpeedup}`);
+    }
+  } else {
+    console.log("No compilation recommendations (try more runs or a more complex graph)");
+  }
+
+  console.log(sep);
+}
+
+// ─── JIT Command ──────────────────────────────────────────────────────────────
+
+async function cmdJIT(filePath: string, runs: number, threshold: number, optimize: boolean = false): Promise<void> {
+  const { execute } = await import("./runtime/executor.js");
+  const { ExecutionProfiler } = await import("./runtime/profiler.js");
+  const { JITCompiler } = await import("./runtime/jit.js");
+  let graph = loadGraph(filePath);
+
+  const profiler = new ExecutionProfiler(graph.id);
+  profiler.setGraph(graph as any);
+  const compiler = new JITCompiler();
+
+  const sep = "═══════════════════════════════════════════════════";
+  const thin = "───────────────────────────────────────────────────";
+
+  console.log(sep);
+  console.log(`AETHER JIT Report: ${graph.id} (v${graph.version})`);
+  console.log(sep);
+
+  // Phase 1: Profile
+  let interpretedTotal = 0;
+  for (let i = 0; i < runs; i++) {
+    const result = await execute({
+      graph: graph as any,
+      inputs: {},
+      nodeImplementations: new Map(),
+      confidenceThreshold: 0.7,
+      jit: {
+        compiler,
+        profiler,
+        autoCompile: false,
+        compilationThreshold: threshold,
+      },
+    });
+    interpretedTotal += result.duration_ms;
+  }
+
+  const interpretedAvg = interpretedTotal / runs;
+  console.log(`Profiling:      ${runs} executions, avg ${interpretedAvg.toFixed(1)}ms`);
+  console.log("");
+
+  // Phase 1.5: Optimize if requested
+  if (optimize) {
+    const { GraphOptimizer } = await import("./compiler/optimizer.js");
+    const profileForOpt = profiler.analyze({ minExecutions: Math.min(runs, threshold), minNodes: 2 });
+    const optimizer = new GraphOptimizer();
+    const optResult = optimizer.applyAll(graph as any);
+    if (optResult.applied.length > 0) {
+      graph = optResult.graph as any;
+      console.log(`Optimization:   ${optResult.applied.length} auto-applied, ${optResult.skipped.length} skipped`);
+      console.log("");
+    }
+  }
+
+  // Phase 2: Analyze and compile
+  const profile = profiler.analyze({ minExecutions: Math.min(runs, threshold), minNodes: 2 });
+
+  if (profile.hotPaths.length > 0) {
+    console.log("Hot Paths:");
+    for (const path of profile.hotPaths) {
+      console.log(`  [${path.nodes.join(" → ")}]`);
+      console.log(`    executions: ${path.executionCount}, avg: ${path.avgTotalTime_ms.toFixed(1)}ms, ${path.wave_count} waves`);
+      const rec = profile.recommendations.find(r => r.subgraph.some(n => path.nodes.includes(n)));
+      if (rec) {
+        console.log(`    recommendation: ${rec.priority.toUpperCase()} — compile into single function`);
+      }
+    }
+    console.log("");
+  }
+
+  // Compile recommended subgraphs
+  const compiledFuncs: any[] = [];
+  for (const rec of profile.recommendations) {
+    const compiled = compiler.compile(graph as any, rec.subgraph);
+    compiledFuncs.push(compiled);
+    console.log("Compilation:");
+    console.log(`  ${compiled.id}: ${compiled.metadata.nodeCount} nodes, ${compiled.metadata.waveCount} waves → 1 function`);
+    console.log(`    contracts inlined: ${compiled.metadata.contractsInlined}`);
+    console.log(`    recoveries inlined: ${compiled.metadata.recoveriesInlined}`);
+    console.log("");
+  }
+
+  if (compiledFuncs.length === 0) {
+    console.log("No subgraphs compiled (graph may be too simple or not enough runs)");
+    console.log(sep);
+    return;
+  }
+
+  // Phase 3: Re-execute with JIT
+  let jitTotal = 0;
+  for (let i = 0; i < runs; i++) {
+    const result = await execute({
+      graph: graph as any,
+      inputs: {},
+      nodeImplementations: new Map(),
+      confidenceThreshold: 0.7,
+      jit: {
+        compiler,
+        profiler: new ExecutionProfiler(graph.id), // fresh profiler for JIT runs
+        autoCompile: false,
+        compilationThreshold: threshold,
+      },
+    });
+    jitTotal += result.duration_ms;
+  }
+
+  const jitAvg = jitTotal / runs;
+  const speedup = ((interpretedAvg - jitAvg) / interpretedAvg * 100);
+
+  console.log("Performance:");
+  console.log(`  Interpreted:  avg ${interpretedAvg.toFixed(1)}ms (${runs} runs)`);
+  console.log(`  JIT compiled: avg ${jitAvg.toFixed(1)}ms  (${runs} runs)`);
+  if (speedup > 0) {
+    console.log(`  Speedup:      ${speedup.toFixed(0)}% faster`);
+  } else {
+    console.log(`  Speedup:      no improvement (graph too simple for JIT overhead to matter)`);
+  }
+  console.log(sep);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 const __cliFilename = fileURLToPath(import.meta.url);
@@ -1195,7 +1483,8 @@ if (__isCliMain) {
     process.exit(0);
   }
 
-  if (!cliFilePath && command !== "incremental") {
+  const noFileCommands = new Set(["incremental", "registry", "search", "install"]);
+  if (!cliFilePath && !noFileCommands.has(command)) {
     console.error("Error: missing <path-to-json> argument");
     printUsage();
     process.exit(1);
@@ -1250,7 +1539,13 @@ if (__isCliMain) {
         case "execute": {
           const inputsIdx = args.indexOf("--inputs");
           const inputsFile = inputsIdx >= 0 ? args[inputsIdx + 1] : undefined;
-          await cmdExecute(cliFilePath, inputsFile);
+          if (args.includes("--jit")) {
+            await cmdJIT(cliFilePath, 20, 10, args.includes("--optimize"));
+          } else if (args.includes("--profile")) {
+            await cmdProfile(cliFilePath, 20);
+          } else {
+            await cmdExecute(cliFilePath, inputsFile);
+          }
           break;
         }
 
@@ -1300,6 +1595,431 @@ if (__isCliMain) {
             process.exit(1);
           }
           cmdDiff(cliFilePath, diffPath2);
+          break;
+        }
+
+        case "profile": {
+          const profileRunsIdx = args.indexOf("--runs");
+          const profileRuns = profileRunsIdx >= 0 ? parseInt(args[profileRunsIdx + 1], 10) : 20;
+          await cmdProfile(cliFilePath, profileRuns);
+          break;
+        }
+
+        case "jit": {
+          const jitRunsIdx = args.indexOf("--runs");
+          const jitRuns = jitRunsIdx >= 0 ? parseInt(args[jitRunsIdx + 1], 10) : 20;
+          const jitThreshIdx = args.indexOf("--threshold");
+          const jitThreshold = jitThreshIdx >= 0 ? parseInt(args[jitThreshIdx + 1], 10) : 10;
+          const jitOptimize = args.includes("--optimize");
+          await cmdJIT(cliFilePath, jitRuns, jitThreshold, jitOptimize);
+          break;
+        }
+
+        case "optimize": {
+          const optApply = args.includes("--apply");
+          const optProfileIdx = args.indexOf("--profile");
+          const optProfilePath = optProfileIdx >= 0 ? args[optProfileIdx + 1] : undefined;
+          await cmdOptimize(cliFilePath, optApply, optProfilePath);
+          break;
+        }
+
+        case "dashboard": {
+          const { collectDashboardData } = await import("./dashboard/collector.js");
+          const { renderDashboard } = await import("./dashboard/render.js");
+          const { writeFileSync } = await import("fs");
+
+          const dashData = await collectDashboardData(cliFilePath, {
+            includeExecution: args.includes("--execute"),
+            includeOptimization: args.includes("--optimize"),
+            includeProofs: args.includes("--proofs"),
+          });
+
+          const html = renderDashboard(dashData);
+          const dashOutputIdx = args.indexOf("--output");
+          const dashOutputPath = dashOutputIdx >= 0 && args[dashOutputIdx + 1]
+            ? args[dashOutputIdx + 1]
+            : `${dashData.graph.id}-dashboard.html`;
+
+          writeFileSync(dashOutputPath, html, "utf-8");
+          console.log(`✓ Dashboard written to ${dashOutputPath}`);
+
+          if (args.includes("--open")) {
+            const { exec } = await import("child_process");
+            const platform = process.platform;
+            const cmd = platform === "win32" ? "start" : platform === "darwin" ? "open" : "xdg-open";
+            exec(`${cmd} "${dashOutputPath}"`);
+          }
+          break;
+        }
+
+        case "dashboard-diff": {
+          const { collectDashboardData: collectDiff } = await import("./dashboard/collector.js");
+          const { diffDashboards, renderDiffView } = await import("./dashboard/diff-view.js");
+          const { writeFileSync: writeDiff } = await import("fs");
+
+          const diffPath2Dash = args[2];
+          if (!diffPath2Dash) {
+            console.error("Error: missing second <path-to-json> argument for dashboard-diff");
+            process.exit(1);
+          }
+
+          const [beforeData, afterData] = await Promise.all([
+            collectDiff(cliFilePath),
+            collectDiff(diffPath2Dash),
+          ]);
+
+          const dashDiff = diffDashboards(beforeData, afterData);
+          const diffHtml = renderDiffView(dashDiff);
+
+          const diffOutIdx = args.indexOf("--output");
+          const diffOutPath = diffOutIdx >= 0 && args[diffOutIdx + 1]
+            ? args[diffOutIdx + 1]
+            : `${beforeData.graph.id}-diff.html`;
+
+          writeDiff(diffOutPath, diffHtml, "utf-8");
+          console.log(`✓ Dashboard diff written to ${diffOutPath}`);
+
+          if (args.includes("--open")) {
+            const { exec } = await import("child_process");
+            const platform = process.platform;
+            const cmd = platform === "win32" ? "start" : platform === "darwin" ? "open" : "xdg-open";
+            exec(`${cmd} "${diffOutPath}"`);
+          }
+          break;
+        }
+
+        case "export-proofs": {
+          const { generateProofExport } = await import("./proofs/generate.js");
+          const { verifyGraph: verifyForProofs } = await import("./compiler/verifier.js");
+          const { writeFileSync: writeProof } = await import("fs");
+
+          const proofGraph = loadGraph(cliFilePath);
+          const sep = "═══════════════════════════════════════════════════";
+
+          // Run verification for proof context
+          let proofVerifyReport: GraphVerificationReport | undefined;
+          try {
+            proofVerifyReport = await verifyForProofs(proofGraph as any);
+          } catch {
+            // Verification optional
+          }
+
+          const proofExport = generateProofExport(proofGraph as any, proofVerifyReport);
+          const proofOutputIdx = args.indexOf("--output");
+          const proofOutputPath = proofOutputIdx >= 0 && args[proofOutputIdx + 1]
+            ? args[proofOutputIdx + 1]
+            : proofExport.filename;
+
+          writeProof(proofOutputPath, proofExport.source, "utf-8");
+
+          const m = proofExport.metadata;
+          const sketched = m.theoremsGenerated - m.fullyProved - m.sorryCount;
+
+          // Collect semantic type wrappers count
+          const proofNodes = (proofGraph as any).nodes.filter((n: any) => !n.hole && !n.intent);
+          const wrapperSet = new Set<string>();
+          for (const node of proofNodes) {
+            for (const [name, ann] of [...Object.entries(node.in || {}), ...Object.entries(node.out || {})]) {
+              const a = ann as any;
+              if (a.domain || a.dimension || a.unit) {
+                const wn = name.replace(/(^|[_-])([a-z])/g, (_: any, __: any, c: string) => c.toUpperCase());
+                wrapperSet.add(wn);
+              }
+            }
+          }
+          const stateTypeCount = ((proofGraph as any).state_types ?? []).length;
+
+          console.log(sep);
+          console.log(`AETHER Proof Export: ${proofGraph.id} (v${proofGraph.version})`);
+          console.log(sep);
+          console.log(`Types exported:    ${wrapperSet.size} semantic wrappers`);
+          console.log(`State types:       ${stateTypeCount}`);
+          console.log(`Node contracts:    ${m.nodesExported} namespaces`);
+          console.log(`Theorems:          ${m.theoremsGenerated}`);
+          console.log(`  Fully proved:    ${m.fullyProved}`);
+          console.log(`  Proof sketches:  ${sketched >= 0 ? sketched : 0}`);
+          console.log(`  Obligations:     ${m.sorryCount}`);
+          console.log(`Edge safety:       ${proofGraph.edges.length} edges`);
+          console.log(`Output:            ${proofOutputPath}`);
+          console.log(sep);
+          break;
+        }
+
+        case "registry": {
+          const { Registry } = await import("./registry/index.js");
+          const subCommand = cliFilePath; // args[1] is the sub-command
+          const sep = "═══════════════════════════════════════════════════";
+
+          switch (subCommand) {
+            case "init": {
+              const regPath = Registry.init();
+              console.log(`✓ Registry initialized at ${regPath}`);
+              break;
+            }
+
+            case "list": {
+              const registry = new Registry();
+              const entries = registry.list();
+
+              if (entries.length === 0) {
+                console.log("No packages in registry. Run: npx tsx scripts/publish-stdlib.ts");
+                break;
+              }
+
+              console.log(sep);
+              console.log("AETHER Registry: list");
+              console.log(sep);
+
+              const templateEntries = entries.filter(e => {
+                const latest = e.versions[e.latest];
+                return latest?.provides_type === "template";
+              });
+              const certEntries = entries.filter(e => {
+                const latest = e.versions[e.latest];
+                return latest?.provides_type === "certified-algorithm";
+              });
+              const otherEntries = entries.filter(e => {
+                const latest = e.versions[e.latest];
+                return latest?.provides_type !== "template" && latest?.provides_type !== "certified-algorithm";
+              });
+
+              if (templateEntries.length > 0) {
+                console.log(`Templates (${templateEntries.length}):`);
+                for (const e of templateEntries) {
+                  const v = e.versions[e.latest];
+                  console.log(`  ${e.name.padEnd(30)} v${e.latest}  ✓ ${v.verification_percentage}%`);
+                }
+                console.log();
+              }
+
+              if (certEntries.length > 0) {
+                console.log(`Certified Algorithms (${certEntries.length}):`);
+                for (const e of certEntries) {
+                  const v = e.versions[e.latest];
+                  console.log(`  ${e.name.padEnd(30)} v${e.latest}  ✓ ${v.verification_percentage}%`);
+                }
+                console.log();
+              }
+
+              if (otherEntries.length > 0) {
+                console.log(`Other (${otherEntries.length}):`);
+                for (const e of otherEntries) {
+                  const v = e.versions[e.latest];
+                  console.log(`  ${e.name.padEnd(30)} v${e.latest}  ✓ ${v.verification_percentage}%`);
+                }
+                console.log();
+              }
+
+              const totalPkgs = entries.length;
+              const avgVerif = entries.reduce((sum, e) => sum + (e.versions[e.latest]?.verification_percentage ?? 0), 0) / totalPkgs;
+              console.log(`${totalPkgs} packages, avg verification: ${avgVerif.toFixed(1)}%`);
+              console.log(sep);
+              break;
+            }
+
+            case "info": {
+              const pkgName = args[2];
+              if (!pkgName) {
+                console.error("Error: missing <package-name> argument");
+                process.exit(1);
+              }
+
+              const registry = new Registry();
+              const info = registry.info(pkgName);
+
+              if (!info) {
+                console.error(`Package not found: ${pkgName}`);
+                process.exit(1);
+              }
+
+              console.log(sep);
+              console.log(`AETHER Registry: info ${pkgName}`);
+              console.log(sep);
+              console.log(`Name:        ${info.name}`);
+              console.log(`Description: ${info.description}`);
+              console.log(`Latest:      v${info.latest}`);
+              console.log(`Keywords:    ${info.keywords.join(", ")}`);
+              console.log();
+              console.log("Versions:");
+              for (const [ver, data] of Object.entries(info.versions)) {
+                console.log(`  v${ver}  ✓ ${data.verification_percentage}%  confidence: ${data.confidence}  type: ${data.provides_type}`);
+                if (Object.keys(data.dependencies).length > 0) {
+                  console.log(`    deps: ${Object.entries(data.dependencies).map(([k, v]) => `${k}@${v}`).join(", ")}`);
+                }
+                if (data.effects.length > 0) {
+                  console.log(`    effects: ${data.effects.join(", ")}`);
+                } else {
+                  console.log(`    effects: none (pure)`);
+                }
+              }
+              console.log(sep);
+              break;
+            }
+
+            case "check": {
+              const checkPkg = args[2];
+              const fromVer = args[3];
+              const toVer = args[4];
+              if (!checkPkg || !fromVer || !toVer) {
+                console.error("Error: usage: registry check <package-name> <from-version> <to-version>");
+                process.exit(1);
+              }
+
+              const registry = new Registry();
+              const compat = registry.checkCompatibility(checkPkg, fromVer, toVer);
+
+              console.log(sep);
+              console.log(`AETHER Registry: compatibility check`);
+              console.log(`${checkPkg} v${fromVer} → v${toVer}`);
+              console.log(sep);
+              console.log(`Compatible: ${compat.compatible ? "✓ yes" : "✗ no"}`);
+              if (compat.breakingChanges.length > 0) {
+                console.log("Breaking changes:");
+                for (const bc of compat.breakingChanges) {
+                  console.log(`  • ${bc}`);
+                }
+              }
+              console.log(`Changes: ${compat.diff.changes.length}`);
+              console.log(sep);
+              break;
+            }
+
+            default:
+              console.error(`Unknown registry sub-command: ${subCommand}`);
+              console.error("Available: init, list, info, check");
+              process.exit(1);
+          }
+          break;
+        }
+
+        case "publish": {
+          const { createPackage, validatePackage } = await import("./registry/package.js");
+          const { Registry } = await import("./registry/index.js");
+          const { writeFileSync: writePub } = await import("fs");
+          const sep = "═══════════════════════════════════════════════════";
+
+          const pubGraph = loadGraph(cliFilePath);
+
+          // Parse optional flags
+          const nameIdx = args.indexOf("--name");
+          const pubName = nameIdx >= 0 && args[nameIdx + 1] ? args[nameIdx + 1] : undefined;
+          const verIdx = args.indexOf("--version");
+          const pubVersion = verIdx >= 0 && args[verIdx + 1] ? args[verIdx + 1] : undefined;
+          const descIdx = args.indexOf("--description");
+          const pubDesc = descIdx >= 0 && args[descIdx + 1] ? args[descIdx + 1] : undefined;
+          const minVerifIdx = args.indexOf("--min-verification");
+          const minVerif = minVerifIdx >= 0 && args[minVerifIdx + 1] ? parseInt(args[minVerifIdx + 1]) : 50;
+
+          // Run verification
+          let pubVerifReport: GraphVerificationReport | undefined;
+          try {
+            pubVerifReport = await verifyGraph(pubGraph as any);
+          } catch {
+            // Verification optional
+          }
+
+          const verifPct = pubVerifReport?.verification_percentage ?? 0;
+          if (verifPct < minVerif) {
+            console.error(`✗ Package verification ${verifPct}% is below minimum ${minVerif}%`);
+            console.error(`  Use --min-verification <N> to change threshold`);
+            process.exit(1);
+          }
+
+          const pkg = createPackage(pubGraph as any, {
+            name: pubName,
+            version: pubVersion,
+            description: pubDesc,
+            verification: {
+              percentage: verifPct,
+              confidence: verifPct / 100,
+              supervised_count: 0,
+              z3_verified: !!pubVerifReport,
+              lean_proofs: false,
+              last_verified: new Date().toISOString(),
+            },
+          });
+
+          if (pubVerifReport) {
+            pkg.verification = pubVerifReport as any;
+          }
+
+          const registry = new Registry();
+          const pubResult = registry.publish(pkg);
+
+          if (pubResult.success) {
+            console.log(sep);
+            console.log(`✓ Published ${pubResult.name} v${pubResult.version}`);
+            console.log(`  Verification: ${pubResult.verification}%`);
+            console.log(sep);
+          } else {
+            console.error(`✗ Publish failed: ${pubResult.errors?.join(", ")}`);
+            process.exit(1);
+          }
+          break;
+        }
+
+        case "install": {
+          const { Registry } = await import("./registry/index.js");
+          const sep = "═══════════════════════════════════════════════════";
+
+          const installPkg = cliFilePath; // args[1] is package name
+          const instVerIdx = args.indexOf("--version");
+          const instVersion = instVerIdx >= 0 && args[instVerIdx + 1] ? args[instVerIdx + 1] : undefined;
+
+          const registry = new Registry();
+          const installResult = registry.install(installPkg, instVersion);
+
+          if (installResult.success) {
+            console.log(sep);
+            console.log(`AETHER Install`);
+            console.log(sep);
+            for (const inst of installResult.installed) {
+              console.log(`  ✓ ${inst.name} v${inst.version}`);
+            }
+            console.log(`Installed to ./aether_packages/`);
+            console.log(sep);
+          } else {
+            console.error(`✗ Install failed: ${installResult.errors?.join(", ")}`);
+            process.exit(1);
+          }
+          break;
+        }
+
+        case "search": {
+          const { Registry } = await import("./registry/index.js");
+          const sep = "═══════════════════════════════════════════════════";
+
+          const searchQuery = cliFilePath ?? args[1] ?? "";
+          if (!searchQuery) {
+            console.error("Error: missing search query");
+            process.exit(1);
+          }
+
+          const registry = new Registry();
+          const results = registry.search(searchQuery);
+
+          console.log(sep);
+          console.log(`AETHER Registry: search "${searchQuery}"`);
+          console.log(sep);
+
+          if (results.length === 0) {
+            console.log("No packages found.");
+          } else {
+            for (const r of results) {
+              const v = r.versions[r.latest];
+              console.log(`${r.name}  v${r.latest}  ✓ ${v.verification_percentage}% verified`);
+              console.log(`  ${r.description}`);
+              if (v.effects.length > 0) {
+                console.log(`  Effects: ${v.effects.join(", ")}`);
+              } else {
+                console.log(`  Effects: none (pure)`);
+              }
+              console.log();
+            }
+          }
+
+          console.log(`Found ${results.length} package${results.length !== 1 ? "s" : ""}.`);
+          console.log(sep);
           break;
         }
 
