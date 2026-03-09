@@ -1,5 +1,79 @@
 # AETHER Changelog
 
+## Phase 3 — Complete (2026-03-09)
+
+Five sessions adding JIT compilation, AI-driven optimization, formal proofs, a verification dashboard, and a community package registry.
+
+### Session 1: JIT Compiler & Profiler
+- **Execution profiler** (`src/runtime/profiler.ts`) — per-node timing, hot path detection, JIT promotion recommendations
+- **JIT compiler** (`src/runtime/jit.ts`) — subgraph compilation to optimized async JavaScript via `AsyncFunction` constructor
+  - Confidence gates, effect reporting, and recovery inlined into generated code
+  - Subgraph hashing (SHA-256) for cache deduplication
+- **Executor integration** — optional `jit` context with auto-compile above configurable threshold
+- **CLI commands:** `profile`, `jit`, `execute --jit`, `execute --profile`
+- **Tests:** profiler, compiler, executor integration, performance (39 new tests)
+
+### Session 2: Tiered Compilation & AI Optimizer
+- **Tier manager** — Tier 0 (interpreted), Tier 1 (sequential compiled), Tier 2 (parallel compiled with contract inlining)
+  - Auto-promotion based on execution count; deoptimization tracking with blacklist (3+ deopts = banned)
+- **Graph optimizer** (`src/compiler/optimizer.ts`) — 11 optimization types:
+  - `merge_sequential_pure`, `eliminate_redundant`, `parallelize_independent`, `strengthen_contract`, `add_missing_adversarial`, `cache_expensive_node`, `reduce_wave_count`, `split_oversized_node`, `scope_decomposition`, `add_missing_recovery`, `improve_confidence`
+  - Auto-applicable vs manual; `analyze()`, `apply()`, `applyAll()` API
+- **CLI commands:** `optimize`, `jit --optimize`
+- **Tests:** tier manager, optimizer analysis, apply, profile-aware (28 new tests)
+
+### Session 3: Lean 4 Formal Proof Export
+- **Type mapper** (`src/proofs/lean-types.ts`) — base types to Lean 4 types, semantic wrappers for domain/dimension/unit types, state type export as inductive types with transition relations
+- **Contract translator** (`src/proofs/lean-contracts.ts`) — AETHER contract expressions to Lean propositions; `sorry` for unsupported expressions
+- **Proof generator** (`src/proofs/generate.ts`) — complete `.lean` file from AetherGraph:
+  - Type definitions, state machines, per-node contract namespaces
+  - Never-invariant/terminal theorems (fully proved via `by intro h; cases h`)
+  - Edge type safety proofs
+  - Z3-verified annotations; failed contracts get WARNING comments
+- **CLI command:** `export-proofs`
+- **Tests:** type mapping, contract translation, full generation, all-programs coverage (114 new tests)
+
+### Session 4: Verification Dashboard
+- **Data collector** (`src/dashboard/collector.ts`) — aggregates validator, checker, verifier, confidence engine, effect tracker, optimizer, and profiler data
+- **HTML dashboard** (`src/dashboard/render.ts`) — self-contained dark-themed dashboard:
+  - Per-node verification breakdown, confidence flow, effect audit
+  - Sortable tables, inline CSS/JS, no external dependencies
+  - Color palette: `#0a0f1a` background, `#6ee7b7` green, `#f43f5e` red, `#fbbf24` yellow, `#a78bfa` purple
+- **Diff view** (`src/dashboard/diff-view.ts`) — node add/remove, verification changes, error tracking between versions
+- **CLI commands:** `dashboard` (with `--execute`, `--optimize`, `--proofs`, `--open`), `dashboard-diff`
+- **Tests:** collector, render, diff, all-programs (39 new tests)
+
+### Session 5: Community Graph Registry
+- **Package format** (`src/registry/package.ts`) — `.aetherpkg` structure:
+  - `aether.pkg.json` manifest, `graph.json`, `verification.json`, optional compact form, proofs, README
+  - `createPackage()`, `validatePackage()`, `loadPackage()`, `savePackage()`
+  - Auto-detects provides type: graph, template, certified-algorithm, scope
+- **Registry index** (`src/registry/index.ts`) — local file-based at `~/.aether/registry/`:
+  - `publish()`, `install()`, `search()`, `list()`, `info()`
+  - `resolveDependencies()` — builds full dependency tree
+  - `checkCompatibility()` — semantic diff between versions
+  - Semver resolution: `^`, `~`, `>=`, `*` ranges
+- **Dependency resolver** (`src/registry/resolver.ts`) — transitive resolution, conflict detection, missing package reporting
+- **Stdlib publisher** (`scripts/publish-stdlib.ts`) — publishes 10 packages:
+  - Templates: `@aether/crud-entity`, `@aether/retry-fallback`, `@aether/auth-gate`, `@aether/confidence-cascade`
+  - Certified algorithms: `@aether/sort-ascending`, `@aether/filter-predicate`, `@aether/deduplicate`, `@aether/aggregate-sum`, `@aether/validate-schema`, `@aether/lookup-by-key`
+- **CLI commands:** `registry init/list/info/check`, `publish`, `install`, `search`
+- **Tests:** package format, registry operations, resolver, stdlib publish, end-to-end pipeline (36 new tests)
+
+### Totals
+- **732 tests** across 59 test files
+- **30+ CLI commands** covering the full lifecycle
+- **36 files changed**, ~9,150 lines added
+- The AETHER ecosystem: write a graph, verify it, optimize it, prove it, visualize it, publish it, share it
+
+---
+
+## Phase 2 — Complete (2026-03-08)
+
+Five sessions adding state types, templates, scopes, multi-agent collaboration, intent resolution, and semantic diff. 476 tests across 38 test files.
+
+---
+
 ## Phase 1 — Complete (2026-03-08)
 
 Four sessions building the full AETHER toolchain on top of the Phase 0 IR foundation.
