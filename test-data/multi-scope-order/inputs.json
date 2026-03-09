@@ -1,0 +1,7 @@
+{
+  "order_items": [
+    { "product_id": "p1", "name": "Widget A", "price": 29.99, "quantity": 2 },
+    { "product_id": "p2", "name": "Gadget B", "price": 49.99, "quantity": 1 }
+  ],
+  "customer_id": "cust_001"
+}

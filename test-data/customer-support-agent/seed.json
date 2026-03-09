@@ -1,0 +1,6 @@
+{
+  "tickets": [
+    { "id": "t1", "customer_id": "c1", "intent": "refund_request", "status": "open" },
+    { "id": "t2", "customer_id": "c2", "intent": "order_status", "status": "open" }
+  ]
+}

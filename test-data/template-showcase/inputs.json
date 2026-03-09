@@ -1,0 +1,9 @@
+{
+  "request": {
+    "path": "/users",
+    "method": "POST",
+    "token": "valid_jwt_token",
+    "headers": { "authorization": "valid_jwt_token" },
+    "body": "{\"name\": \"New User\"}"
+  }
+}

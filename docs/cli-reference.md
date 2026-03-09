@@ -111,8 +111,12 @@ npx tsx src/cli.ts execute src/ir/examples/user-registration.json --inputs input
 | `--jit` | Enable JIT compilation |
 | `--profile` | Enable profiling |
 | `--inputs <path>` | Provide initial input values (JSON) |
+| `--real` | Enable real execution mode (resolve implementations, enforce contracts) |
+| `--seed <path>` | Seed database with initial data (JSON: `{ table: [records] }`) |
+| `--contracts <mode>` | Contract enforcement: `enforce` (default with --real), `warn`, `skip` |
+| `--inject-failures <json>` | Inject service failures for testing recovery |
 
-Output: wave-by-wave execution log with confidence propagation and effect tracking.
+Output: wave-by-wave execution log with confidence propagation and effect tracking. In `--real` mode, also shows node outputs and contract satisfaction report.
 
 ### `jit <path> [flags]`
 Profile, JIT-compile, and benchmark a graph.

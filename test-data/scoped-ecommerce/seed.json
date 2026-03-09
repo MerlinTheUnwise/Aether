@@ -1,0 +1,7 @@
+{
+  "carts": [
+    { "id": "cart_1", "session_id": "sess_001", "name": "Premium Widget", "price": 79.99, "quantity": 2 },
+    { "id": "cart_2", "session_id": "sess_001", "name": "Basic Gadget", "price": 29.99, "quantity": 1 }
+  ],
+  "orders": []
+}

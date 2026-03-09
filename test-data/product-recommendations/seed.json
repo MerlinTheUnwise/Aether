@@ -1,0 +1,29 @@
+{
+  "users": [
+    { "id": "u1", "name": "Alice", "token": "valid_token_alice", "authenticated": true },
+    { "id": "u2", "name": "Bob", "token": "valid_token_bob", "authenticated": true }
+  ],
+  "products": [
+    { "id": "p1", "name": "Widget A", "category": "electronics", "price": 29.99, "popularity": 10 },
+    { "id": "p2", "name": "Widget B", "category": "electronics", "price": 49.99, "popularity": 8 },
+    { "id": "p3", "name": "Gadget C", "category": "gadgets", "price": 19.99, "popularity": 15 },
+    { "id": "p4", "name": "Gadget D", "category": "gadgets", "price": 39.99, "popularity": 5 },
+    { "id": "p5", "name": "Tool E", "category": "tools", "price": 59.99, "popularity": 12 },
+    { "id": "p6", "name": "Tool F", "category": "tools", "price": 24.99, "popularity": 7 },
+    { "id": "p7", "name": "Part G", "category": "parts", "price": 9.99, "popularity": 20 },
+    { "id": "p8", "name": "Part H", "category": "parts", "price": 14.99, "popularity": 3 },
+    { "id": "p9", "name": "Supply I", "category": "supplies", "price": 34.99, "popularity": 9 },
+    { "id": "p10", "name": "Supply J", "category": "supplies", "price": 44.99, "popularity": 11 },
+    { "id": "p11", "name": "Item K", "category": "misc", "price": 69.99, "popularity": 6 },
+    { "id": "p12", "name": "Item L", "category": "misc", "price": 79.99, "popularity": 4 }
+  ],
+  "purchases": [
+    { "id": "pur1", "user_id": "u1", "product": { "id": "p1", "product_id": "p1" } },
+    { "id": "pur2", "user_id": "u1", "product": { "id": "p3", "product_id": "p3" } }
+  ],
+  "views": [
+    { "id": "v1", "user_id": "u1", "product": { "id": "p2", "product_id": "p2" } },
+    { "id": "v2", "user_id": "u1", "product": { "id": "p5", "product_id": "p5" } },
+    { "id": "v3", "user_id": "u1", "product": { "id": "p2", "product_id": "p2" } }
+  ]
+}

@@ -109,3 +109,21 @@ Three runtime modes from the same source:
 | **Certified Algorithm** | A library algorithm with Z3-proven contracts |
 | **Template** | A parameterized subgraph that can be instantiated with type-safe bindings |
 | **Boundary Contract** | An interface contract between two scopes (requires/provides) |
+
+## Real Execution
+
+AETHER programs are not just specifications — they execute with real computation, real data, and real contract enforcement. Three execution modes are available:
+
+### Stub Mode (`execute <path>`)
+Structural verification with typed defaults. Each node produces default outputs matching its output types. Contracts are skipped (defaults won't satisfy real contracts). Useful for validating graph structure and wave scheduling.
+
+### Real Mode (`execute <path> --real`)
+Actual computation with full contract enforcement. Each node resolves to a registered implementation that performs real data processing. Contracts (pre/post/invariants) are evaluated against actual outputs. Effects are tracked and validated. Recovery strategies fire on real failures.
+
+Real mode requires:
+- **Implementations** registered for each node ID in the `ImplementationRegistry`
+- **Services** (database, filesystem, email, ML) injected via `ServiceContainer`
+- **Test data** — seed files for databases, input files for the graph
+
+### Native Mode (`compile <path>`)
+LLVM compilation for performance-critical deployments. The graph is compiled to native machine code with contracts inlined. See the [Native Compilation](native-compilation.md) guide.

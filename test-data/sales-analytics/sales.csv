@@ -1,0 +1,501 @@
+transaction_id,date,product_id,product_name,category,region,amount,customer_id
+TX00001,2025-09-09,P018,Stapler,Stationery,East,44.97,C0076
+TX00002,2025-12-30,P016,Binder Clips,Stationery,North,12.99,C0029
+TX00003,2025-11-25,P022,Space Heater,Appliances,West,199.99,C0011
+TX00004,2025-01-17,P026,First Aid Kit,Safety,Central,79.99,C0085
+TX00005,2025-08-26,P023,Mini Fridge,Appliances,Central,149.99,C0034
+TX00006,2025-07-08,P002,Wireless Mouse,Electronics,South,1199.97,C0028
+TX00007,2025-11-08,P001,Laptop Pro,Electronics,East,799.98,C0071
+TX00008,2025-02-20,P025,Safety Goggles,Safety,South,39.98,C0092
+TX00009,2025-02-26,P026,First Aid Kit,Safety,South,59.98,C0003
+TX00010,2025-08-02,P029,Safety Vest,Safety,South,99.98,C0074
+TX00011,2025-01-30,P025,Safety Goggles,Safety,West,39.99,C0027
+TX00012,2025-06-04,P028,Hard Hat,Safety,Central,149.97,C0023
+TX00013,2025-12-29,P003,USB Hub,Electronics,North,199.98,C0055
+TX00014,2025-01-09,P013,Notebook Set,Stationery,South,11.98,C0042
+TX00015,2025-07-13,P023,Mini Fridge,Appliances,East,149.99,C0069
+TX00016,2025-01-05,P023,Mini Fridge,Appliances,West,399.98,C0024
+TX00017,2025-08-06,P010,Desk Lamp,Furniture,East,1649.97,C0083
+TX00018,2025-02-05,P003,USB Hub,Electronics,Central,799.98,C0013
+TX00019,2025-11-13,P025,Safety Goggles,Safety,West,239.97,C0065
+TX00020,2025-05-06,P011,Filing Cabinet,Furniture,North,149.99,C0091
+TX00021,2025-06-13,P022,Space Heater,Appliances,East,79.99,C0054
+TX00022,2025-08-15,P029,Safety Vest,Safety,North,59.97,C0061
+TX00023,2025-02-04,P016,Binder Clips,Stationery,East,3.99,C0022
+TX00024,2025-04-16,P010,Desk Lamp,Furniture,Central,49.99,C0071
+TX00025,2025-10-08,P022,Space Heater,Appliances,Central,39.99,C0055
+TX00026,2025-01-12,P020,Water Filter,Appliances,South,449.97,C0018
+TX00027,2025-04-06,P008,Standing Desk,Furniture,North,149.99,C0077
+TX00028,2025-01-04,P002,Wireless Mouse,Electronics,North,49.99,C0082
+TX00029,2025-04-27,P027,Fire Extinguisher,Safety,North,24.99,C0078
+TX00030,2025-09-02,P012,Whiteboard,Furniture,East,449.97,C0073
+TX00031,2025-05-24,P013,Notebook Set,Stationery,South,11.97,C0092
+TX00032,2025-11-24,P002,Wireless Mouse,Electronics,North,159.98,C0058
+TX00033,2025-05-27,P025,Safety Goggles,Safety,Central,19.99,C0040
+TX00034,2025-09-04,P002,Wireless Mouse,Electronics,East,259.98,C0085
+TX00035,2025-03-01,P020,Water Filter,Appliances,North,299.98,C0031
+TX00036,2025-03-01,P006,Headphones BT,Electronics,North,749.97,C0008
+TX00037,2025-11-05,P021,Air Purifier,Appliances,North,39.99,C0015
+TX00038,2025-08-17,P023,Mini Fridge,Appliances,South,599.97,C0039
+TX00039,2025-01-14,P025,Safety Goggles,Safety,West,79.99,C0005
+TX00040,2025-05-23,P011,Filing Cabinet,Furniture,East,1649.97,C0069
+TX00041,2025-08-23,P003,USB Hub,Electronics,South,149.97,C0017
+TX00042,2025-02-07,P026,First Aid Kit,Safety,East,19.99,C0070
+TX00043,2025-09-15,P030,Ear Protection,Safety,East,24.99,C0059
+TX00044,2025-05-07,P029,Safety Vest,Safety,North,59.98,C0031
+TX00045,2025-06-04,P006,Headphones BT,Electronics,West,249.99,C0058
+TX00046,2025-09-25,P008,Standing Desk,Furniture,East,149.99,C0065
+TX00047,2025-08-29,P025,Safety Goggles,Safety,North,59.97,C0074
+TX00048,2025-04-03,P012,Whiteboard,Furniture,North,179.98,C0098
+TX00049,2025-01-23,P020,Water Filter,Appliances,East,899.97,C0062
+TX00050,2025-02-03,P020,Water Filter,Appliances,Central,79.99,C0064
+TX00051,2025-07-24,P028,Hard Hat,Safety,South,,C0068
+TX00052,2025-10-01,P007,Office Chair,Furniture,North,,C0062
+TX00053,2025-03-07,P022,Space Heater,Appliances,Central,,C0094
+TX00054,2025-01-10,P030,Ear Protection,Safety,North,,C0026
+TX00055,2025-04-24,P010,Desk Lamp,Furniture,East,,C0035
+TX00056,2025-09-24,P013,Notebook Set,Stationery,South,,C0026
+TX00057,2025-04-02,P023,Mini Fridge,Appliances,Central,,C0028
+TX00058,2025-05-23,P026,First Aid Kit,Safety,North,,C0026
+TX00059,2025-03-31,P026,First Aid Kit,Safety,West,,C0096
+TX00060,2025-10-25,P021,Air Purifier,Appliances,North,,C0002
+TX00061,2025-12-24,P004,Monitor 27in,Electronics,North,,C0010
+TX00062,2025-06-15,P011,Filing Cabinet,Furniture,West,,C0036
+TX00063,2025-04-28,P004,Monitor 27in,Electronics,Central,,C0058
+TX00064,2025-11-11,P006,Headphones BT,Electronics,West,,C0076
+TX00065,2025-02-28,P020,Water Filter,Appliances,Central,,C0089
+TX00066,2025-10-10,P002,Wireless Mouse,Electronics,South,499.98,C0008
+TX00067,2025-01-06,P015,Sticky Notes,Stationery,Central,44.97,C0089
+TX00068,2025-06-20,P011,Filing Cabinet,Furniture,Central,199.99,C0089
+TX00069,2025-05-26,P014,Pen Pack,Stationery,East,25.98,C0072
+TX00070,2025-07-29,P021,Air Purifier,Appliances,West,299.99,C0042
+TX00071,2025-11-01,P027,Fire Extinguisher,Safety,South,89.97,C0097
+TX00072,2025-12-05,P021,Air Purifier,Appliances,North,199.99,C0092
+TX00073,2025-02-09,P029,Safety Vest,Safety,West,79.99,C0034
+TX00074,2025-11-25,P018,Stapler,Stationery,West,29.98,C0006
+TX00075,2025-06-04,P024,Microwave,Appliances,South,899.97,C0058
+TX00076,2025-06-07,P016,Binder Clips,Stationery,North,23.97,C0030
+TX00077,2025-06-07,P009,Bookshelf,Furniture,Central,269.97,C0063
+TX00078,2025-01-28,P016,Binder Clips,Stationery,Central,5.99,C0046
+TX00079,2025-04-20,P014,Pen Pack,Stationery,East,12.99,C0036
+TX00080,2025-03-24,P008,Standing Desk,Furniture,North,1649.97,C0001
+TX00081,2025-10-04,P029,Safety Vest,Safety,East,39.98,C0076
+TX00082,2025-08-23,P008,Standing Desk,Furniture,Central,599.97,C0055
+TX00083,2025-04-11,P016,Binder Clips,Stationery,Central,74.97,C0083
+TX00084,2025-03-05,P006,Headphones BT,Electronics,South,299.97,C0093
+TX00085,2025-11-06,P017,Printer Paper,Stationery,North,5.99,C0069
+TX00086,2025-11-27,P024,Microwave,Appliances,West,79.99,C0008
+TX00087,2025-05-08,P023,Mini Fridge,Appliances,South,899.97,C0057
+TX00088,2025-10-26,P028,Hard Hat,Safety,North,59.97,C0078
+TX00089,2025-10-03,P016,Binder Clips,Stationery,East,11.97,C0066
+TX00090,2025-03-11,P029,Safety Vest,Safety,West,74.97,C0084
+TX00091,2025-02-03,P020,Water Filter,Appliances,South,599.98,C0100
+TX00092,2025-03-15,P011,Filing Cabinet,Furniture,Central,1099.98,C0003
+TX00093,2025-06-14,P026,First Aid Kit,Safety,East,39.98,C0023
+TX00094,2025-03-21,P008,Standing Desk,Furniture,East,199.99,C0044
+TX00095,2025-07-16,P005,Keyboard Mech,Electronics,Central,799.98,C0089
+TX00096,2025-10-02,P027,Fire Extinguisher,Safety,North,89.97,C0076
+TX00097,2025-05-07,P017,Printer Paper,Stationery,East,7.98,C0080
+TX00098,2025-09-29,P019,Coffee Maker,Appliances,West,399.98,C0029
+TX00099,2025-06-16,P015,Sticky Notes,Stationery,South,15.98,C0009
+TX00100,2025-12-11,P003,USB Hub,Electronics,North,389.97,C0047
+TX00101,2025-10-15,,,,West,399.99,C0041
+TX00102,2025-09-09,,,,East,179.98,C0052
+TX00103,2025-12-28,,,,West,3.99,C0016
+TX00104,2025-01-24,,,,West,149.97,C0068
+TX00105,2025-06-16,,,,North,99.98,C0090
+TX00106,2025-03-27,,,,East,599.98,C0080
+TX00107,2025-04-07,,,,South,74.97,C0029
+TX00108,2025-01-13,,,,Central,79.99,C0069
+TX00109,2025-04-26,,,,West,99.99,C0056
+TX00110,2025-10-30,,,,East,239.97,C0047
+TX00111,2025-02-12,P025,Safety Goggles,Safety,East,149.97,C0050
+TX00112,2025-06-15,P030,Ear Protection,Safety,North,29.99,C0061
+TX00113,2025-12-01,P007,Office Chair,Furniture,Central,1099.98,C0090
+TX00114,2025-01-10,P030,Ear Protection,Safety,North,24.99,C0044
+TX00115,2025-08-05,P022,Space Heater,Appliances,East,899.97,C0027
+TX00116,2025-03-15,P014,Pen Pack,Stationery,Central,5.99,C0040
+TX00117,2025-11-15,P028,Hard Hat,Safety,Central,239.97,C0049
+TX00118,2025-02-10,P006,Headphones BT,Electronics,South,79.99,C0036
+TX00119,2025-10-02,P024,Microwave,Appliances,East,179.97,C0014
+TX00120,2025-07-12,P027,Fire Extinguisher,Safety,North,29.99,C0042
+TX00121,2025-03-21,P018,Stapler,Stationery,West,23.97,C0006
+TX00122,2025-06-13,P003,USB Hub,Electronics,East,99.98,C0001
+TX00123,2025-11-14,P001,Laptop Pro,Electronics,South,149.97,C0034
+TX00124,2025-03-16,P016,Binder Clips,Stationery,West,7.99,C0081
+TX00125,2025-12-30,P013,Notebook Set,Stationery,South,12.99,C0050
+TX00126,2025-09-24,P003,USB Hub,Electronics,North,299.97,C0079
+TX00127,2025-10-28,P012,Whiteboard,Furniture,West,199.99,C0076
+TX00128,2025-12-01,P005,Keyboard Mech,Electronics,Central,299.97,C0081
+TX00129,2025-12-03,P009,Bookshelf,Furniture,West,399.98,C0096
+TX00130,2025-08-08,P020,Water Filter,Appliances,East,119.98,C0065
+TX00131,2025-03-06,P025,Safety Goggles,Safety,South,89.97,C0029
+TX00132,2025-03-09,P008,Standing Desk,Furniture,East,269.97,C0051
+TX00133,2025-02-13,P001,Laptop Pro,Electronics,East,129.99,C0092
+TX00134,2025-12-23,P007,Office Chair,Furniture,West,149.99,C0039
+TX00135,2025-10-05,P001,Laptop Pro,Electronics,West,199.98,C0093
+TX00136,2025-10-06,P017,Printer Paper,Stationery,Central,5.99,C0047
+TX00137,2025-02-10,P024,Microwave,Appliances,Central,179.97,C0097
+TX00138,2025-04-12,P024,Microwave,Appliances,South,899.97,C0038
+TX00139,2025-06-05,P001,Laptop Pro,Electronics,West,1199.97,C0008
+TX00140,2025-11-16,P005,Keyboard Mech,Electronics,East,239.97,C0082
+TX00141,2025-10-29,P017,Printer Paper,Stationery,East,23.97,C0095
+TX00142,2025-10-06,P017,Printer Paper,Stationery,Central,74.97,C0099
+TX00143,2025-11-19,P003,USB Hub,Electronics,Central,399.99,C0035
+TX00144,2025-11-29,P020,Water Filter,Appliances,West,199.99,C0029
+TX00145,2025-04-19,P019,Coffee Maker,Appliances,North,149.99,C0005
+TX00146,2025-04-11,P007,Office Chair,Furniture,South,149.99,C0002
+TX00147,2025-02-14,P017,Printer Paper,Stationery,Central,12.99,C0013
+TX00148,2025-12-20,P016,Binder Clips,Stationery,South,5.99,C0026
+TX00149,2025-02-25,P015,Sticky Notes,Stationery,South,12.99,C0021
+TX00150,2025-08-12,P003,USB Hub,Electronics,East,299.97,C0012
+TX00151,2025-01-18,P003,USB Hub,Electronics,South,249.99,C0033
+TX00152,2025-07-23,P020,Water Filter,Appliances,West,39.99,C0089
+TX00153,2025-11-06,P005,Keyboard Mech,Electronics,East,199.98,C0009
+TX00154,2025-11-11,P030,Ear Protection,Safety,South,24.99,C0080
+TX00155,2025-03-18,P003,USB Hub,Electronics,East,199.98,C0082
+TX00156,2025-03-04,P001,Laptop Pro,Electronics,West,239.97,C0032
+TX00157,2025-06-25,P007,Office Chair,Furniture,South,549.99,C0080
+TX00158,2025-12-18,P006,Headphones BT,Electronics,West,149.97,C0015
+TX00159,2025-03-14,P018,Stapler,Stationery,Central,15.98,C0083
+TX00160,2025-07-11,P026,First Aid Kit,Safety,West,99.98,C0075
+TX00161,2025-07-26,P003,USB Hub,Electronics,Central,129.99,C0014
+TX00162,2025-07-29,P002,Wireless Mouse,Electronics,North,49.99,C0028
+TX00163,2025-04-21,P024,Microwave,Appliances,East,59.99,C0060
+TX00164,2025-07-02,P013,Notebook Set,Stationery,East,3.99,C0023
+TX00165,2025-03-03,P030,Ear Protection,Safety,West,99.98,C0060
+TX00166,2025-01-24,P002,Wireless Mouse,Electronics,West,249.99,C0055
+TX00167,2025-09-29,P029,Safety Vest,Safety,South,159.98,C0098
+TX00168,2025-08-25,P022,Space Heater,Appliances,Central,79.99,C0010
+TX00169,2025-09-24,P003,USB Hub,Electronics,South,299.97,C0008
+TX00170,2025-04-27,P020,Water Filter,Appliances,East,449.97,C0063
+TX00171,2025-03-13,P014,Pen Pack,Stationery,North,3.99,C0038
+TX00172,2025-06-25,P006,Headphones BT,Electronics,East,299.97,C0092
+TX00173,2025-08-12,P030,Ear Protection,Safety,East,239.97,C0099
+TX00174,2025-10-02,P025,Safety Goggles,Safety,South,159.98,C0008
+TX00175,2025-10-14,P005,Keyboard Mech,Electronics,West,799.98,C0037
+TX00176,2025-05-30,P004,Monitor 27in,Electronics,West,49.99,C0032
+TX00177,2025-01-24,P023,Mini Fridge,Appliances,East,399.98,C0079
+TX00178,2025-02-22,P029,Safety Vest,Safety,East,79.99,C0090
+TX00179,2025-09-01,P019,Coffee Maker,Appliances,Central,159.98,C0063
+TX00180,2025-10-16,P001,Laptop Pro,Electronics,South,149.97,C0011
+TX00181,2025-06-05,P024,Microwave,Appliances,East,299.98,C0070
+TX00182,2025-10-16,P002,Wireless Mouse,Electronics,South,79.99,C0081
+TX00183,2025-03-15,P017,Printer Paper,Stationery,North,11.98,C0014
+TX00184,2025-09-14,P024,Microwave,Appliances,North,399.98,C0021
+TX00185,2025-11-26,P004,Monitor 27in,Electronics,South,799.98,C0003
+TX00186,2025-04-25,P014,Pen Pack,Stationery,West,23.97,C0028
+TX00187,2025-03-17,P016,Binder Clips,Stationery,Central,17.97,C0023
+TX00188,2025-09-29,P021,Air Purifier,Appliances,North,199.99,C0039
+TX00189,2025-03-03,P021,Air Purifier,Appliances,North,449.97,C0098
+TX00190,2025-08-20,P013,Notebook Set,Stationery,West,29.98,C0087
+TX00191,2025-02-22,P007,Office Chair,Furniture,North,299.98,C0003
+TX00192,2025-04-03,P018,Stapler,Stationery,South,25.98,C0031
+TX00193,2025-06-14,P029,Safety Vest,Safety,South,59.98,C0070
+TX00194,2025-03-03,P010,Desk Lamp,Furniture,Central,599.97,C0087
+TX00195,2025-09-04,P023,Mini Fridge,Appliances,North,119.97,C0089
+TX00196,2025-12-11,P004,Monitor 27in,Electronics,East,499.98,C0020
+TX00197,2025-02-01,P018,Stapler,Stationery,Central,29.98,C0085
+TX00198,2025-01-10,P025,Safety Goggles,Safety,South,149.97,C0095
+TX00199,2025-09-20,P001,Laptop Pro,Electronics,East,99.98,C0040
+TX00200,2025-10-06,P014,Pen Pack,Stationery,West,12.99,C0080
+TX00001,2025-02-12,P026,First Aid Kit,Safety,South,39.99,C0007
+TX00002,2025-06-15,P009,Bookshelf,Furniture,East,149.99,C0030
+TX00003,2025-03-05,P030,Ear Protection,Safety,Central,239.97,C0059
+TX00004,2025-12-06,P017,Printer Paper,Stationery,North,11.97,C0019
+TX00005,2025-12-11,P008,Standing Desk,Furniture,South,899.97,C0002
+TX00006,2025-01-04,P010,Desk Lamp,Furniture,South,599.98,C0014
+TX00007,2025-03-15,P018,Stapler,Stationery,West,74.97,C0066
+TX00008,2025-05-25,P002,Wireless Mouse,Electronics,North,149.97,C0064
+TX00009,2025-08-11,P010,Desk Lamp,Furniture,East,599.98,C0005
+TX00010,2025-10-28,P020,Water Filter,Appliances,South,899.97,C0084
+TX00011,2025-08-23,P023,Mini Fridge,Appliances,North,159.98,C0028
+TX00012,2025-11-02,P020,Water Filter,Appliances,South,599.98,C0080
+TX00013,2025-02-10,P009,Bookshelf,Furniture,North,199.99,C0034
+TX00014,2025-03-30,P002,Wireless Mouse,Electronics,South,239.97,C0033
+TX00015,2025-03-21,P011,Filing Cabinet,Furniture,North,299.98,C0067
+TX00016,2025-04-21,P014,Pen Pack,Stationery,West,24.99,C0063
+TX00017,2025-03-12,P023,Mini Fridge,Appliances,North,39.99,C0068
+TX00018,2025-09-19,P004,Monitor 27in,Electronics,North,99.99,C0082
+TX00019,2025-03-23,P015,Sticky Notes,Stationery,West,14.99,C0018
+TX00020,2025-04-30,P030,Ear Protection,Safety,West,99.98,C0045
+TX00221,2025-09-02,P021,Air Purifier,Appliances,South,79.99,C0043
+TX00222,2025-11-15,P014,Pen Pack,Stationery,South,5.99,C0094
+TX00223,2025-09-28,P011,Filing Cabinet,Furniture,Central,179.98,C0023
+TX00224,2025-11-05,P024,Microwave,Appliances,West,599.98,C0077
+TX00225,2025-03-15,P018,Stapler,Stationery,West,7.99,C0099
+TX00226,2025-01-25,P016,Binder Clips,Stationery,Central,5.99,C0050
+TX00227,2025-07-21,P001,Laptop Pro,Electronics,East,49.99,C0009
+TX00228,2025-01-10,P023,Mini Fridge,Appliances,Central,179.97,C0065
+TX00229,2025-04-03,P015,Sticky Notes,Stationery,East,11.98,C0003
+TX00230,2025-11-14,P011,Filing Cabinet,Furniture,South,49.99,C0057
+TX00231,2025-05-31,P017,Printer Paper,Stationery,Central,17.97,C0032
+TX00232,2025-12-11,P011,Filing Cabinet,Furniture,West,1099.98,C0065
+TX00233,2025-10-11,P015,Sticky Notes,Stationery,West,15.98,C0072
+TX00234,2025-02-10,P009,Bookshelf,Furniture,East,49.99,C0087
+TX00235,2025-08-01,P001,Laptop Pro,Electronics,Central,79.99,C0059
+TX00236,2025-10-06,P026,First Aid Kit,Safety,South,19.99,C0004
+TX00237,2025-10-25,P007,Office Chair,Furniture,North,149.99,C0069
+TX00238,2025-04-20,P021,Air Purifier,Appliances,South,899.97,C0011
+TX00239,2025-09-07,P024,Microwave,Appliances,West,199.99,C0054
+TX00240,2025-05-25,P023,Mini Fridge,Appliances,East,119.97,C0028
+TX00241,2025-11-11,P017,Printer Paper,Stationery,Central,12.99,C0047
+TX00242,2025-03-17,P026,First Aid Kit,Safety,West,19.99,C0043
+TX00243,2025-12-31,P026,First Aid Kit,Safety,South,49.98,C0082
+TX00244,2025-04-05,P011,Filing Cabinet,Furniture,Central,49.99,C0071
+TX00245,2025-02-07,P008,Standing Desk,Furniture,West,599.98,C0039
+TX00246,2025-04-01,P013,Notebook Set,Stationery,South,15.98,C0071
+TX00247,2025-12-14,P024,Microwave,Appliances,South,79.98,C0021
+TX00248,2025-05-18,P011,Filing Cabinet,Furniture,East,149.97,C0002
+TX00249,2025-12-26,P030,Ear Protection,Safety,East,59.98,C0005
+TX00250,2025-02-26,P010,Desk Lamp,Furniture,West,599.97,C0084
+TX00251,2025-02-10,P002,Wireless Mouse,Electronics,West,49.99,C0078
+TX00252,2025-07-16,P001,Laptop Pro,Electronics,West,499.98,C0035
+TX00253,2025-06-12,P028,Hard Hat,Safety,South,119.97,C0052
+TX00254,2025-10-28,P019,Coffee Maker,Appliances,South,449.97,C0010
+TX00255,2025-03-07,P009,Bookshelf,Furniture,Central,299.98,C0040
+TX00256,2025-01-26,P007,Office Chair,Furniture,Central,549.99,C0071
+TX00257,2025-09-17,P025,Safety Goggles,Safety,South,159.98,C0089
+TX00258,2025-07-12,P014,Pen Pack,Stationery,Central,11.98,C0028
+TX00259,2025-02-14,P025,Safety Goggles,Safety,South,59.97,C0027
+TX00260,2025-07-23,P009,Bookshelf,Furniture,North,179.98,C0014
+TX00261,2025-11-07,P010,Desk Lamp,Furniture,West,99.98,C0083
+TX00262,2025-03-02,P003,USB Hub,Electronics,South,799.98,C0011
+TX00263,2025-01-27,P002,Wireless Mouse,Electronics,Central,49.99,C0039
+TX00264,2025-12-07,P009,Bookshelf,Furniture,North,49.99,C0056
+TX00265,2025-11-27,P012,Whiteboard,Furniture,West,1099.98,C0069
+TX00266,2025-05-02,P021,Air Purifier,Appliances,South,239.97,C0019
+TX00267,2025-10-18,P015,Sticky Notes,Stationery,West,23.97,C0034
+TX00268,2025-09-23,P002,Wireless Mouse,Electronics,South,749.97,C0083
+TX00269,2025-11-22,P009,Bookshelf,Furniture,South,149.97,C0073
+TX00270,2025-04-18,P021,Air Purifier,Appliances,South,599.98,C0067
+TX00271,2025-06-13,P014,Pen Pack,Stationery,South,29.98,C0004
+TX00272,2025-11-14,P019,Coffee Maker,Appliances,South,179.97,C0031
+TX00273,2025-07-11,P022,Space Heater,Appliances,West,79.99,C0075
+TX00274,2025-03-23,P006,Headphones BT,Electronics,North,249.99,C0043
+TX00275,2025-07-25,P023,Mini Fridge,Appliances,North,299.99,C0001
+TX00276,2025-06-11,P019,Coffee Maker,Appliances,East,179.97,C0008
+TX00277,2025-06-19,P011,Filing Cabinet,Furniture,Central,99.98,C0075
+TX00278,2025-12-15,P012,Whiteboard,Furniture,South,89.99,C0020
+TX00279,2025-05-10,P016,Binder Clips,Stationery,South,11.98,C0044
+TX00280,2025-05-19,P004,Monitor 27in,Electronics,East,99.99,C0024
+TX00281,2025-12-19,P002,Wireless Mouse,Electronics,North,79.99,C0086
+TX00282,2025-05-03,P023,Mini Fridge,Appliances,South,899.97,C0066
+TX00283,2025-04-09,P028,Hard Hat,Safety,Central,39.99,C0021
+TX00284,2025-03-27,P005,Keyboard Mech,Electronics,West,49.99,C0095
+TX00285,2025-08-14,P024,Microwave,Appliances,East,199.99,C0076
+TX00286,2025-03-06,P008,Standing Desk,Furniture,East,299.98,C0080
+TX00287,2025-03-07,P017,Printer Paper,Stationery,West,12.99,C0054
+TX00288,2025-06-05,P015,Sticky Notes,Stationery,West,25.98,C0027
+TX00289,2025-12-05,P030,Ear Protection,Safety,North,89.97,C0048
+TX00290,2025-12-05,P007,Office Chair,Furniture,Central,899.97,C0034
+TX00291,2025-09-14,P029,Safety Vest,Safety,East,29.99,C0086
+TX00292,2025-07-23,P013,Notebook Set,Stationery,North,15.98,C0097
+TX00293,2025-02-03,P011,Filing Cabinet,Furniture,North,299.99,C0036
+TX00294,2025-03-31,P016,Binder Clips,Stationery,Central,24.99,C0055
+TX00295,2025-12-08,P011,Filing Cabinet,Furniture,East,599.97,C0004
+TX00296,2025-11-07,P018,Stapler,Stationery,South,12.99,C0100
+TX00297,2025-06-27,P004,Monitor 27in,Electronics,Central,259.98,C0093
+TX00298,2025-03-07,P028,Hard Hat,Safety,South,74.97,C0045
+TX00299,2025-04-23,P014,Pen Pack,Stationery,West,49.98,C0025
+TX00300,2025-11-23,P013,Notebook Set,Stationery,West,3.99,C0013
+TX00301,2025-10-18,P008,Standing Desk,Furniture,North,-449.97,C0070
+TX00302,2025-07-01,P008,Standing Desk,Furniture,West,-399.98,C0003
+TX00303,2025-11-15,P013,Notebook Set,Stationery,North,-5.99,C0069
+TX00304,2025-01-26,P001,Laptop Pro,Electronics,West,-399.99,C0058
+TX00305,2025-02-07,P001,Laptop Pro,Electronics,East,-199.98,C0035
+TX00306,2025-02-09,P028,Hard Hat,Safety,West,-149.97,C0095
+TX00307,2025-01-13,P022,Space Heater,Appliances,Central,-159.98,C0067
+TX00308,2025-06-20,P028,Hard Hat,Safety,North,-89.97,C0036
+TX00309,2025-04-02,P005,Keyboard Mech,Electronics,East,799.98,C0017
+TX00310,2025-10-28,P008,Standing Desk,Furniture,Central,899.97,C0036
+TX00311,2025-12-21,P006,Headphones BT,Electronics,East,299.97,C0085
+TX00312,2025-07-04,P024,Microwave,Appliances,South,199.99,C0072
+TX00313,2025-01-04,P009,Bookshelf,Furniture,Central,149.99,C0077
+TX00314,2025-11-08,P026,First Aid Kit,Safety,South,74.97,C0009
+TX00315,2025-02-16,P010,Desk Lamp,Furniture,East,179.98,C0054
+TX00316,2025-11-26,P012,Whiteboard,Furniture,East,299.98,C0050
+TX00317,2025-01-25,P012,Whiteboard,Furniture,East,599.97,C0098
+TX00318,2025-07-13,P016,Binder Clips,Stationery,South,12.99,C0029
+TX00319,2025-01-18,P022,Space Heater,Appliances,North,119.97,C0040
+TX00320,2025-07-22,P014,Pen Pack,Stationery,North,3.99,C0035
+TX00321,2025-04-22,P015,Sticky Notes,Stationery,North,29.98,C0050
+TX00322,2025-11-25,P010,Desk Lamp,Furniture,North,179.98,C0038
+TX00323,2025-05-27,P012,Whiteboard,Furniture,South,149.97,C0080
+TX00324,2025-08-17,P019,Coffee Maker,Appliances,North,599.97,C0052
+TX00325,2025-12-19,P018,Stapler,Stationery,North,11.97,C0090
+TX00326,2025-12-05,P022,Space Heater,Appliances,West,39.99,C0022
+TX00327,2025-12-03,P007,Office Chair,Furniture,Central,199.99,C0016
+TX00328,2025-02-10,P022,Space Heater,Appliances,Central,899.97,C0092
+TX00329,2025-06-12,P022,Space Heater,Appliances,Central,39.99,C0013
+TX00330,2025-11-26,P019,Coffee Maker,Appliances,West,399.98,C0088
+TX00331,2025-12-20,P020,Water Filter,Appliances,West,79.99,C0066
+TX00332,2025-10-10,P022,Space Heater,Appliances,West,149.99,C0063
+TX00333,2025-12-24,P030,Ear Protection,Safety,Central,39.99,C0085
+TX00334,2025-03-16,P027,Fire Extinguisher,Safety,West,39.98,C0031
+TX00335,2025-04-15,P008,Standing Desk,Furniture,West,549.99,C0096
+TX00336,2025-01-12,P025,Safety Goggles,Safety,West,59.98,C0066
+TX00337,2025-12-23,P027,Fire Extinguisher,Safety,North,49.99,C0092
+TX00338,2025-02-15,P016,Binder Clips,Stationery,North,25.98,C0095
+TX00339,2025-02-16,P001,Laptop Pro,Electronics,East,399.99,C0043
+TX00340,2025-05-22,P025,Safety Goggles,Safety,East,79.98,C0091
+TX00341,2025-07-13,P006,Headphones BT,Electronics,East,799.98,C0014
+TX00342,2025-02-02,P005,Keyboard Mech,Electronics,South,499.98,C0022
+TX00343,2025-02-19,P004,Monitor 27in,Electronics,West,389.97,C0059
+TX00344,2025-04-28,P018,Stapler,Stationery,South,15.98,C0078
+TX00345,2025-02-10,P005,Keyboard Mech,Electronics,Central,499.98,C0097
+TX00346,2025-12-17,P016,Binder Clips,Stationery,North,29.98,C0056
+TX00347,2025-04-28,P005,Keyboard Mech,Electronics,North,49.99,C0082
+TX00348,2025-06-27,P008,Standing Desk,Furniture,West,599.97,C0088
+TX00349,2025-09-15,P019,Coffee Maker,Appliances,South,899.97,C0083
+TX00350,2025-03-08,P022,Space Heater,Appliances,North,79.99,C0039
+TX00351,2025-10-22,P013,Notebook Set,Stationery,East,23.97,C0093
+TX00352,2025-09-07,P023,Mini Fridge,Appliances,Central,149.99,C0076
+TX00353,2025-04-29,P015,Sticky Notes,Stationery,Central,44.97,C0064
+TX00354,2025-03-29,P009,Bookshelf,Furniture,North,1649.97,C0006
+TX00355,2025-05-19,P010,Desk Lamp,Furniture,Central,179.98,C0026
+TX00356,2025-11-03,P014,Pen Pack,Stationery,North,7.99,C0087
+TX00357,2025-10-23,P007,Office Chair,Furniture,West,149.97,C0028
+TX00358,2025-06-16,P028,Hard Hat,Safety,South,79.99,C0062
+TX00359,2025-04-18,P018,Stapler,Stationery,South,17.97,C0033
+TX00360,2025-02-25,P001,Laptop Pro,Electronics,South,99.98,C0005
+TX00361,2025-01-02,P011,Filing Cabinet,Furniture,South,449.97,C0021
+TX00362,2025-09-19,P027,Fire Extinguisher,Safety,Central,149.97,C0044
+TX00363,2025-11-25,P023,Mini Fridge,Appliances,North,119.98,C0087
+TX00364,2025-02-24,P029,Safety Vest,Safety,East,19.99,C0081
+TX00365,2025-02-13,P030,Ear Protection,Safety,Central,74.97,C0044
+TX00366,2025-09-20,P011,Filing Cabinet,Furniture,West,149.99,C0008
+TX00367,2025-11-30,P025,Safety Goggles,Safety,East,49.98,C0084
+TX00368,2025-10-29,P003,USB Hub,Electronics,North,389.97,C0041
+TX00369,2025-01-01,P006,Headphones BT,Electronics,South,239.97,C0040
+TX00370,2025-05-14,P015,Sticky Notes,Stationery,Central,44.97,C0009
+TX00371,2025-06-22,P010,Desk Lamp,Furniture,East,149.97,C0091
+TX00372,2025-04-15,P015,Sticky Notes,Stationery,East,12.99,C0056
+TX00373,2025-02-18,P008,Standing Desk,Furniture,South,449.97,C0061
+TX00374,2025-11-29,P001,Laptop Pro,Electronics,North,1199.97,C0064
+TX00375,2025-06-25,P015,Sticky Notes,Stationery,South,12.99,C0064
+TX00376,2025-03-24,P018,Stapler,Stationery,North,7.99,C0092
+TX00377,2025-08-22,P020,Water Filter,Appliances,West,239.97,C0040
+TX00378,2025-07-27,P013,Notebook Set,Stationery,East,3.99,C0040
+TX00379,2025-11-13,P001,Laptop Pro,Electronics,West,259.98,C0062
+TX00380,2025-02-04,P009,Bookshelf,Furniture,Central,89.99,C0054
+TX00381,2025-04-07,P011,Filing Cabinet,Furniture,East,179.98,C0036
+TX00382,2025-12-14,P021,Air Purifier,Appliances,West,59.99,C0078
+TX00383,2025-08-25,P009,Bookshelf,Furniture,East,99.98,C0058
+TX00384,2025-06-06,P006,Headphones BT,Electronics,East,159.98,C0012
+TX00385,2025-04-15,P012,Whiteboard,Furniture,South,299.99,C0029
+TX00386,2025-06-15,P021,Air Purifier,Appliances,North,299.99,C0059
+TX00387,2025-07-07,P016,Binder Clips,Stationery,East,12.99,C0082
+TX00388,2025-08-01,P007,Office Chair,Furniture,Central,299.98,C0024
+TX00389,2025-11-28,P029,Safety Vest,Safety,North,74.97,C0084
+TX00390,2025-12-12,P006,Headphones BT,Electronics,South,159.98,C0006
+TX00391,2025-06-25,P026,First Aid Kit,Safety,East,99.98,C0060
+TX00392,2025-05-05,P013,Notebook Set,Stationery,East,38.97,C0014
+TX00393,2025-01-28,P021,Air Purifier,Appliances,East,899.97,C0051
+TX00394,2025-09-12,P022,Space Heater,Appliances,Central,79.99,C0092
+TX00395,2025-10-25,P013,Notebook Set,Stationery,North,7.99,C0042
+TX00396,2025-07-02,P012,Whiteboard,Furniture,North,269.97,C0030
+TX00397,2025-02-23,P005,Keyboard Mech,Electronics,West,199.98,C0100
+TX00398,2025-04-15,P025,Safety Goggles,Safety,West,119.97,C0080
+TX00399,2025-12-03,P007,Office Chair,Furniture,Central,89.99,C0073
+TX00400,2025-03-30,P018,Stapler,Stationery,North,7.98,C0056
+TX00401,2027-06-15,P013,Notebook Set,Stationery,East,11.97,C0074
+TX00402,2027-06-15,P012,Whiteboard,Furniture,East,1649.97,C0007
+TX00403,2027-06-15,P014,Pen Pack,Stationery,North,11.97,C0089
+TX00404,2025-02-06,P014,Pen Pack,Stationery,North,15.98,C0029
+TX00405,2025-05-04,P010,Desk Lamp,Furniture,South,299.99,C0080
+TX00406,2025-03-17,P002,Wireless Mouse,Electronics,West,1199.97,C0010
+TX00407,2025-03-18,P010,Desk Lamp,Furniture,East,599.98,C0068
+TX00408,2025-12-29,P025,Safety Goggles,Safety,East,74.97,C0013
+TX00409,2025-05-14,P023,Mini Fridge,Appliances,Central,119.97,C0070
+TX00410,2025-06-05,P020,Water Filter,Appliances,Central,79.98,C0021
+TX00411,2025-07-28,P018,Stapler,Stationery,Central,23.97,C0002
+TX00412,2025-02-09,P030,Ear Protection,Safety,West,99.98,C0046
+TX00413,2025-12-27,P011,Filing Cabinet,Furniture,South,549.99,C0064
+TX00414,2025-01-01,P017,Printer Paper,Stationery,West,12.99,C0059
+TX00415,2025-12-13,P026,First Aid Kit,Safety,East,79.99,C0084
+TX00416,2025-05-25,P013,Notebook Set,Stationery,East,49.98,C0060
+TX00417,2025-10-19,P018,Stapler,Stationery,North,29.98,C0097
+TX00418,2025-05-06,P011,Filing Cabinet,Furniture,East,179.98,C0034
+TX00419,2025-04-24,P022,Space Heater,Appliances,North,599.97,C0063
+TX00420,2025-07-15,P004,Monitor 27in,Electronics,South,99.99,C0010
+TX00421,2025-03-01,P003,USB Hub,Electronics,North,249.99,C0079
+TX00422,2025-06-25,P003,USB Hub,Electronics,South,49.99,C0006
+TX00423,2025-02-23,P017,Printer Paper,Stationery,South,29.98,C0044
+TX00424,2025-08-05,P004,Monitor 27in,Electronics,North,159.98,C0086
+TX00425,2025-10-04,P018,Stapler,Stationery,Central,7.98,C0005
+TX00426,2025-08-11,P011,Filing Cabinet,Furniture,South,269.97,C0018
+TX00427,2025-08-29,P012,Whiteboard,Furniture,West,599.97,C0079
+TX00428,2025-08-24,P013,Notebook Set,Stationery,West,11.98,C0004
+TX00429,2025-06-16,P002,Wireless Mouse,Electronics,East,159.98,C0071
+TX00430,2025-09-07,P011,Filing Cabinet,Furniture,West,549.99,C0009
+TX00431,2025-01-10,P015,Sticky Notes,Stationery,North,29.98,C0019
+TX00432,2025-03-18,P013,Notebook Set,Stationery,East,15.98,C0067
+TX00433,2025-05-20,P003,USB Hub,Electronics,South,799.98,C0017
+TX00434,2025-03-16,P012,Whiteboard,Furniture,West,179.98,C0093
+TX00435,2025-12-21,P004,Monitor 27in,Electronics,North,499.98,C0062
+TX00436,2025-06-06,P014,Pen Pack,Stationery,North,74.97,C0018
+TX00437,2025-12-02,P022,Space Heater,Appliances,West,119.97,C0055
+TX00438,2025-02-22,P011,Filing Cabinet,Furniture,West,89.99,C0077
+TX00439,2025-01-18,P017,Printer Paper,Stationery,South,24.99,C0012
+TX00440,2025-05-24,P019,Coffee Maker,Appliances,North,239.97,C0024
+TX00441,2025-01-16,P002,Wireless Mouse,Electronics,West,389.97,C0097
+TX00442,2025-11-16,P015,Sticky Notes,Stationery,East,5.99,C0034
+TX00443,2025-04-09,P017,Printer Paper,Stationery,West,11.97,C0003
+TX00444,2025-05-05,P021,Air Purifier,Appliances,North,39.99,C0008
+TX00445,2025-04-27,P004,Monitor 27in,Electronics,South,49.99,C0015
+TX00446,2025-04-05,P028,Hard Hat,Safety,East,39.99,C0061
+TX00447,2025-08-21,P001,Laptop Pro,Electronics,East,159.98,C0082
+TX00448,2025-10-24,P020,Water Filter,Appliances,North,449.97,C0073
+TX00449,2025-03-08,P019,Coffee Maker,Appliances,South,299.99,C0022
+TX00450,2025-10-15,P009,Bookshelf,Furniture,Central,449.97,C0072
+TX00451,2025-01-12,P001,Laptop Pro,Electronics,South,259.98,C0011
+TX00452,2025-02-04,P026,First Aid Kit,Safety,North,49.99,C0092
+TX00453,2025-04-16,P022,Space Heater,Appliances,Central,449.97,C0095
+TX00454,2025-01-24,P008,Standing Desk,Furniture,East,149.97,C0097
+TX00455,2025-10-04,P030,Ear Protection,Safety,North,59.98,C0052
+TX00456,2025-08-04,P001,Laptop Pro,Electronics,North,749.97,C0034
+TX00457,2025-12-27,P005,Keyboard Mech,Electronics,Central,149.97,C0083
+TX00458,2025-03-06,P016,Binder Clips,Stationery,West,74.97,C0070
+TX00459,2025-09-13,P007,Office Chair,Furniture,East,599.97,C0051
+TX00460,2025-05-29,P001,Laptop Pro,Electronics,South,129.99,C0006
+TX00461,2025-05-17,P006,Headphones BT,Electronics,East,159.98,C0058
+TX00462,2025-05-18,P010,Desk Lamp,Furniture,North,449.97,C0094
+TX00463,2025-04-24,P014,Pen Pack,Stationery,North,7.98,C0076
+TX00464,2025-01-27,P016,Binder Clips,Stationery,West,11.98,C0046
+TX00465,2025-04-14,P010,Desk Lamp,Furniture,Central,1649.97,C0041
+TX00466,2025-02-20,P008,Standing Desk,Furniture,North,149.97,C0012
+TX00467,2025-02-25,P019,Coffee Maker,Appliances,North,79.98,C0070
+TX00468,2025-12-24,P001,Laptop Pro,Electronics,Central,99.99,C0049
+TX00469,2025-01-22,P028,Hard Hat,Safety,East,59.98,C0078
+TX00470,2025-10-13,P028,Hard Hat,Safety,West,89.97,C0030
+TX00471,2025-02-25,P004,Monitor 27in,Electronics,Central,399.99,C0100
+TX00472,2025-10-18,P023,Mini Fridge,Appliances,West,159.98,C0054
+TX00473,2025-04-15,P028,Hard Hat,Safety,North,149.97,C0010
+TX00474,2025-09-19,P020,Water Filter,Appliances,South,79.98,C0017
+TX00475,2025-02-19,P001,Laptop Pro,Electronics,South,199.98,C0073
+TX00476,2025-06-30,P019,Coffee Maker,Appliances,West,299.98,C0063
+TX00477,2025-03-30,P001,Laptop Pro,Electronics,West,99.98,C0048
+TX00478,2025-10-30,P009,Bookshelf,Furniture,North,149.97,C0026
+TX00479,2025-04-12,P021,Air Purifier,Appliances,Central,149.99,C0023
+TX00480,2025-10-18,P010,Desk Lamp,Furniture,East,1099.98,C0025
+TX00481,2025-08-01,P012,Whiteboard,Furniture,East,199.99,C0085
+TX00482,2025-12-06,P003,USB Hub,Electronics,Central,199.98,C0084
+TX00483,2025-02-25,P007,Office Chair,Furniture,South,1099.98,C0073
+TX00484,2025-08-15,P029,Safety Vest,Safety,North,149.97,C0012
+TX00485,2025-07-28,P001,Laptop Pro,Electronics,East,1199.97,C0040
+TX00486,2025-09-15,P022,Space Heater,Appliances,South,199.99,C0015
+TX00487,2025-08-09,P001,Laptop Pro,Electronics,East,259.98,C0077
+TX00488,2025-09-08,P020,Water Filter,Appliances,Central,79.98,C0035
+TX00489,2025-01-09,P016,Binder Clips,Stationery,South,17.97,C0079
+TX00490,2025-07-14,P005,Keyboard Mech,Electronics,South,249.99,C0005
+TX00491,2025-06-02,P020,Water Filter,Appliances,East,119.97,C0037
+TX00492,2025-10-06,P007,Office Chair,Furniture,West,89.99,C0031
+TX00493,2025-03-04,P027,Fire Extinguisher,Safety,Central,59.97,C0086
+TX00494,2025-08-13,P028,Hard Hat,Safety,East,89.97,C0040
+TX00495,2025-12-28,P002,Wireless Mouse,Electronics,Central,79.99,C0073
+TX00496,2025-09-07,P014,Pen Pack,Stationery,North,11.97,C0051
+TX00497,2025-04-19,P021,Air Purifier,Appliances,East,179.97,C0024
+TX00498,2025-10-06,P020,Water Filter,Appliances,West,119.97,C0082
+TX00499,2025-04-14,P029,Safety Vest,Safety,Central,159.98,C0041
+TX00500,2025-05-11,P020,Water Filter,Appliances,South,149.99,C0041

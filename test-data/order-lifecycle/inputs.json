@@ -1,0 +1,7 @@
+{
+  "customer_id": "cust_001",
+  "items": [
+    { "name": "Laptop Stand", "price": 49.99 },
+    { "name": "USB Cable", "price": 12.99 }
+  ]
+}

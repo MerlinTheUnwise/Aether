@@ -1,0 +1,6 @@
+{
+  "seller_id": "seller_1",
+  "product_data": { "name": "New Product", "price": "49.99", "category": "electronics" },
+  "search_query": "widget",
+  "buyer_id": "buyer_001"
+}

@@ -15,6 +15,11 @@ import { EffectTracker } from "./effects.js";
 import { extractScope, computeScopeOrder } from "../compiler/scopes.js";
 import type { ExecutionProfiler } from "./profiler.js";
 import type { JITCompiler } from "./jit.js";
+import { checkContract, checkAdversarial, AdversarialViolation } from "./evaluator/checker.js";
+export { AdversarialViolation } from "./evaluator/checker.js";
+import type { ImplementationRegistry } from "../implementations/registry.js";
+import type { ServiceContainer } from "../implementations/services/container.js";
+import type { NodeImplementation, ImplementationContext } from "../implementations/types.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +38,11 @@ export interface ExecutionContext {
     autoCompile: boolean;
     compilationThreshold: number;
   };
+
+  // Registry-based resolution (Phase 5)
+  registry?: ImplementationRegistry;
+  services?: ServiceContainer;
+  contractMode?: "enforce" | "skip" | "warn";
 }
 
 export interface ExecutionLogEntry {
@@ -59,6 +69,15 @@ export interface StateTracker {
   violations: string[];
 }
 
+export interface ContractReport {
+  totalChecked: number;
+  passed: number;
+  violated: number;
+  unevaluable: number;
+  adversarialTriggered: number;
+  warnings: string[];
+}
+
 export interface ExecutionResult {
   outputs: Record<string, any>;
   confidence: number;
@@ -73,6 +92,7 @@ export interface ExecutionResult {
     violations: string[];
     finalStates: Record<string, string>;
   };
+  contractReport?: ContractReport;
 }
 
 export class ContractViolation extends Error {
@@ -197,49 +217,18 @@ function computeWaves(graph: AetherGraph): Wave[] {
 // ─── Contract Evaluation ─────────────────────────────────────────────────────
 
 /**
- * Simple runtime contract evaluator.
- * Converts AETHER contract expressions to JavaScript and evaluates.
- * For unsupported expressions, logs a warning and returns true.
+ * Runtime contract evaluator using the new expression evaluator.
+ * Never silently passes — unevaluable expressions produce warnings.
+ * Kept as a compatibility wrapper; new code should use checkContract directly.
  */
 export function evaluateContract(expression: string, variables: Record<string, any>): boolean {
-  try {
-    let js = expression;
-
-    // Replace logical operators
-    js = js.replace(/\s*∧\s*/g, " && ");
-    js = js.replace(/\s*∨\s*/g, " || ");
-    js = js.replace(/¬/g, "!");
-    js = js.replace(/\s*≠\s*/g, " !== ");
-    js = js.replace(/\s*≤\s*/g, " <= ");
-    js = js.replace(/\s*≥\s*/g, " >= ");
-
-    // x ∈ list → list.includes(x)
-    js = js.replace(/(\w+)\s*∈\s*(\w+)/g, "$2.includes($1)");
-
-    // x in [a, b, c] → [a, b, c].includes(x)
-    js = js.replace(/(\w+)\s+in\s+(\[.+?\])/g, "$2.includes($1)");
-
-    // Unsupported: quantifiers, set ops, <=>, exists(), complex lambda
-    if (/∀|∃|<=>|exists\(|forall\(|∪|∩|⊂|⊆/.test(js)) {
-      return true; // Assume passing — Z3 already checked
-    }
-
-    // Replace standalone = with === (but not == or != or <=/>= already handled)
-    js = js.replace(/(?<!=)(?<!!)\b=(?!=)/g, " === ");
-    // Fix potential triple ===
-    js = js.replace(/===\s*===/g, "===");
-
-    // Build a safe evaluation context
-    const keys = Object.keys(variables);
-    const values = Object.values(variables);
-
-    // Create function with variable bindings
-    const fn = new Function(...keys, `try { return !!(${js}); } catch(e) { return true; }`);
-    return fn(...values);
-  } catch {
-    // Can't evaluate → assume passing
-    return true;
+  const result = checkContract(expression, variables);
+  if (result.unevaluable) {
+    // Log warning — never silent
+    console.warn(`[AETHER] UNEVALUABLE contract: ${expression} — ${result.error}`);
+    return false; // Never assume passing
   }
+  return result.passed;
 }
 
 // ─── Input Gathering ─────────────────────────────────────────────────────────
@@ -415,15 +404,46 @@ async function executeNode(
     }
   }
 
-  // 4. Execute implementation
-  const impl = context.nodeImplementations.get(node.id);
-  const isStub = !impl;
+  // 4. Resolve implementation: nodeImplementations → registry → stub
+  let implFn: ((inputs: Record<string, any>) => Promise<Record<string, any>>) | undefined;
+  const legacyImpl = context.nodeImplementations.get(node.id);
+  if (legacyImpl) {
+    implFn = legacyImpl;
+  } else if (context.registry) {
+    const resolved = context.registry.resolve(node);
+    if (resolved) {
+      // Wrap NodeImplementation → NodeFunction by providing ImplementationContext
+      const registryImpl = resolved.implementation;
+      const implContext: ImplementationContext = {
+        nodeId: node.id,
+        effects: node.effects,
+        confidence: node.confidence ?? 1.0,
+        reportEffect: (effect: string) => {
+          effectTracker.recordEffect(node.id, effect);
+          context.onEffectExecuted?.(node.id, effect, {});
+        },
+        log: (msg: string) => {},
+        getService: context.services ? <T>(name: string) => context.services!.get<T>(name) : undefined,
+      };
+      implFn = (inp) => registryImpl(inp, implContext);
+    }
+  }
 
-  // 3. Precondition check (skip in stub mode — upstream defaults won't satisfy real contracts)
-  if (!isStub) {
+  const isStub = !implFn;
+  // Default contractMode: skip for stubs, enforce when impl exists (either via registry or legacy map)
+  const contractMode = isStub ? "skip" : (context.contractMode ?? "enforce");
+
+  // 3. Precondition check
+  if (contractMode === "enforce") {
     for (const pre of node.contract.pre ?? []) {
       if (!evaluateContract(pre, inputs)) {
         throw new ContractViolation(node.id, "precondition", pre);
+      }
+    }
+  } else if (contractMode === "warn") {
+    for (const pre of node.contract.pre ?? []) {
+      if (!evaluateContract(pre, inputs)) {
+        console.warn(`[AETHER:WARN] Precondition violation in "${node.id}": ${pre}`);
       }
     }
   }
@@ -435,18 +455,44 @@ async function executeNode(
     result = generateDefaults(node.out);
   } else {
     try {
-      result = await impl(inputs);
+      result = await implFn!(inputs);
     } catch (error) {
-      // 5. Recovery
+      // 5. Recovery — need to adapt retryWithBackoff to use resolved impl
       result = await executeRecoveryStrategy(node, error as Error, inputs, context);
     }
   }
 
-  // 6. Postcondition check (skip in stub mode — defaults won't satisfy real contracts)
-  if (!isStub) {
+  // 6. Postcondition check
+  if (contractMode === "enforce") {
     for (const post of node.contract.post ?? []) {
       if (!evaluateContract(post, { ...inputs, ...result })) {
         throw new ContractViolation(node.id, "postcondition", post);
+      }
+    }
+
+    // 6b. Adversarial check
+    if (node.adversarial_check) {
+      const adversarialReport = checkAdversarial(node.adversarial_check, inputs, result);
+      if (!adversarialReport.allClear) {
+        const triggered = adversarialReport.checks.find(c => c.triggered);
+        if (triggered) {
+          throw new AdversarialViolation(node.id, triggered.expression);
+        }
+      }
+    }
+  } else if (contractMode === "warn") {
+    for (const post of node.contract.post ?? []) {
+      if (!evaluateContract(post, { ...inputs, ...result })) {
+        console.warn(`[AETHER:WARN] Postcondition violation in "${node.id}": ${post}`);
+      }
+    }
+    if (node.adversarial_check) {
+      const adversarialReport = checkAdversarial(node.adversarial_check, inputs, result);
+      if (!adversarialReport.allClear) {
+        const triggered = adversarialReport.checks.find(c => c.triggered);
+        if (triggered) {
+          console.warn(`[AETHER:WARN] Adversarial trigger in "${node.id}": ${triggered.expression}`);
+        }
       }
     }
   }
@@ -481,6 +527,12 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
 
   const confidenceEngine = new ConfidenceEngine(context.graph, context.confidenceThreshold);
   const effectTracker = new EffectTracker(context.graph);
+
+  // Contract report tracking
+  const contractReport: ContractReport = {
+    totalChecked: 0, passed: 0, violated: 0, unevaluable: 0,
+    adversarialTriggered: 0, warnings: [],
+  };
 
   // State tracking setup
   const stateTracker: StateTracker = {
@@ -619,6 +671,42 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
         recoveryTriggered: !!result.error,
       });
 
+      // Track contracts for the report
+      if (!result.skipped) {
+        const node = nodeMap.get(result.nodeId);
+        if (node) {
+          const hasLegacy = context.nodeImplementations.has(node.id);
+          const hasRegistry = context.registry ? !!context.registry.resolve(node) : false;
+          const isStub = !hasLegacy && !hasRegistry;
+          if (isStub) {
+            const contractCount = (node.contract.pre?.length ?? 0) + (node.contract.post?.length ?? 0) +
+              (node.contract.invariants?.length ?? 0) + (node.adversarial_check?.break_if?.length ?? 0);
+            if (contractCount > 0) {
+              contractReport.warnings.push(`${node.id}: ${contractCount} contracts SKIPPED (stub mode)`);
+            }
+          } else {
+            for (const expr of [...(node.contract.pre ?? []), ...(node.contract.post ?? []), ...(node.contract.invariants ?? [])]) {
+              contractReport.totalChecked++;
+              const check = checkContract(expr, { ...gatherInputs(node, state, context.graph.edges, context.inputs), ...result.outputs });
+              if (check.unevaluable) contractReport.unevaluable++;
+              else if (check.passed) contractReport.passed++;
+              else contractReport.violated++;
+              contractReport.warnings.push(...check.warnings);
+            }
+            if (node.adversarial_check) {
+              for (const expr of node.adversarial_check.break_if) {
+                contractReport.totalChecked++;
+                const check = checkContract(expr, { ...gatherInputs(node, state, context.graph.edges, context.inputs), ...result.outputs });
+                if (!check.unevaluable && check.passed) contractReport.adversarialTriggered++;
+                else if (check.unevaluable) contractReport.unevaluable++;
+                else contractReport.passed++;
+                contractReport.warnings.push(...check.warnings);
+              }
+            }
+          }
+        }
+      }
+
       // Track state transitions for state-typed output ports
       if (stateTypeMap.size > 0 && !result.skipped) {
         const node = nodeMap.get(result.nodeId);
@@ -701,6 +789,7 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
     duration_ms: totalDuration,
     waves: waves.length,
     stateTransitions,
+    contractReport,
   };
 
   // Record in profiler
@@ -773,6 +862,9 @@ export async function executeScope(
     confidenceThreshold: context.confidenceThreshold,
     onOversightRequired: context.onOversightRequired,
     onEffectExecuted: context.onEffectExecuted,
+    registry: context.registry,
+    services: context.services,
+    contractMode: context.contractMode,
   };
 
   const result = await execute(scopeContext);
@@ -872,5 +964,43 @@ export async function executeScopedGraph(context: ExecutionContext): Promise<Exe
     nodesSkipped: totalSkipped,
     duration_ms: performance.now() - totalStart,
     waves: totalWaves,
+  };
+}
+
+// ─── Context Factory ──────────────────────────────────────────────────────────
+
+export async function createExecutionContext(
+  graph: AetherGraph,
+  inputs: Record<string, any>,
+  options?: {
+    serviceConfig?: import("../implementations/services/container.js").ServiceContainerConfig;
+    contractMode?: "enforce" | "skip" | "warn";
+    implementations?: Map<string, NodeFunction>;
+  },
+): Promise<ExecutionContext> {
+  const { ImplementationRegistry } = await import("../implementations/registry.js");
+  const { registerProgramImplementations } = await import("../implementations/programs/index.js");
+  const { ServiceContainer } = await import("../implementations/services/container.js");
+
+  const services = ServiceContainer.createDefault(options?.serviceConfig);
+  const registry = new ImplementationRegistry();
+  registry.registerCore();
+  registerProgramImplementations(registry);
+
+  // Apply user overrides
+  if (options?.implementations) {
+    for (const [nodeId, fn] of options.implementations) {
+      registry.override(nodeId, async (inp, ctx) => fn(inp));
+    }
+  }
+
+  return {
+    graph,
+    inputs,
+    nodeImplementations: options?.implementations ?? new Map(),
+    confidenceThreshold: 0.7,
+    registry,
+    services,
+    contractMode: options?.contractMode ?? "enforce",
   };
 }

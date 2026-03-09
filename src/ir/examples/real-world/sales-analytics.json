@@ -1,0 +1,198 @@
+{
+  "id": "sales_analytics_pipeline",
+  "version": 1,
+  "effects": ["filesystem.read", "filesystem.write", "ml_model.infer", "email"],
+  "metadata": {
+    "description": "Real-world sales analytics pipeline: CSV ingestion, validation, cleaning, anomaly detection, parallel analytics, report generation, archival, and email delivery",
+    "safety_level": "standard"
+  },
+  "nodes": [
+    {
+      "id": "fetch_csv_data",
+      "in": {
+        "file_path": { "type": "String", "domain": "filesystem" }
+      },
+      "out": {
+        "raw_data": { "type": "List<Record>", "domain": "sales" }
+      },
+      "contract": {
+        "post": ["raw_data.length > 0"]
+      },
+      "effects": ["filesystem.read"],
+      "recovery": {
+        "file_not_found": {
+          "action": "escalate",
+          "params": { "message": "CSV file not found" }
+        }
+      }
+    },
+    {
+      "id": "validate_records",
+      "in": {
+        "raw_data": { "type": "List<Record>", "domain": "sales" }
+      },
+      "out": {
+        "valid": { "type": "List<Record>", "domain": "sales" },
+        "invalid": { "type": "List<Record>", "domain": "sales" }
+      },
+      "contract": {
+        "post": ["valid.length + invalid.length == raw_data.length"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "clean_and_normalize",
+      "in": {
+        "valid": { "type": "List<Record>", "domain": "sales" }
+      },
+      "out": {
+        "cleaned": { "type": "List<Record>", "domain": "sales" }
+      },
+      "contract": {
+        "post": ["cleaned.length <= valid.length"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "detect_anomalies",
+      "in": {
+        "cleaned": { "type": "List<Record>", "domain": "sales" }
+      },
+      "out": {
+        "data": { "type": "List<Record>", "domain": "sales" },
+        "anomalies": { "type": "List<Record>", "domain": "sales" }
+      },
+      "contract": {
+        "post": ["data.length + anomalies.length == cleaned.length"]
+      },
+      "confidence": 0.82,
+      "adversarial_check": {
+        "break_if": ["anomalies.length > cleaned.length * 0.5"]
+      },
+      "effects": ["ml_model.infer"],
+      "recovery": {
+        "model_error": {
+          "action": "fallback",
+          "params": { "value": { "data": [], "anomalies": [] } }
+        }
+      }
+    },
+    {
+      "id": "calculate_revenue_by_region",
+      "in": {
+        "data": { "type": "List<Record>", "domain": "sales" }
+      },
+      "out": {
+        "revenue_by_region": { "type": "List<Record>", "domain": "analytics" }
+      },
+      "contract": {
+        "post": ["revenue_by_region.length > 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "calculate_top_products",
+      "in": {
+        "data": { "type": "List<Record>", "domain": "sales" }
+      },
+      "out": {
+        "top_products": { "type": "List<Record>", "domain": "analytics" }
+      },
+      "contract": {
+        "post": ["top_products.length <= 10"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "calculate_growth_trends",
+      "in": {
+        "data": { "type": "List<Record>", "domain": "sales" }
+      },
+      "out": {
+        "trends": { "type": "List<Record>", "domain": "analytics" }
+      },
+      "contract": {
+        "post": ["trends.length > 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "generate_report",
+      "in": {
+        "revenue_by_region": { "type": "List<Record>", "domain": "analytics" },
+        "top_products": { "type": "List<Record>", "domain": "analytics" },
+        "trends": { "type": "List<Record>", "domain": "analytics" },
+        "anomalies": { "type": "List<Record>", "domain": "sales" }
+      },
+      "out": {
+        "report": { "type": "Record", "domain": "analytics" }
+      },
+      "contract": {
+        "post": ["report.sections_count == 4"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "archive_report",
+      "in": {
+        "report": { "type": "Record", "domain": "analytics" }
+      },
+      "out": {
+        "archived": { "type": "Bool" },
+        "path": { "type": "String", "domain": "filesystem" }
+      },
+      "contract": {
+        "post": ["archived == true"]
+      },
+      "effects": ["filesystem.write"],
+      "recovery": {
+        "disk_full": {
+          "action": "escalate",
+          "params": { "message": "disk full — cannot archive report" }
+        }
+      }
+    },
+    {
+      "id": "email_report",
+      "in": {
+        "report": { "type": "Record", "domain": "analytics" },
+        "archived": { "type": "Bool" }
+      },
+      "out": {
+        "sent": { "type": "Bool" }
+      },
+      "contract": {
+        "pre": ["archived == true"],
+        "post": ["sent == true"]
+      },
+      "effects": ["email"],
+      "recovery": {
+        "email_failure": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "fetch_csv_data.raw_data", "to": "validate_records.raw_data" },
+    { "from": "validate_records.valid", "to": "clean_and_normalize.valid" },
+    { "from": "clean_and_normalize.cleaned", "to": "detect_anomalies.cleaned" },
+    { "from": "detect_anomalies.data", "to": "calculate_revenue_by_region.data" },
+    { "from": "detect_anomalies.data", "to": "calculate_top_products.data" },
+    { "from": "detect_anomalies.data", "to": "calculate_growth_trends.data" },
+    { "from": "detect_anomalies.anomalies", "to": "generate_report.anomalies" },
+    { "from": "calculate_revenue_by_region.revenue_by_region", "to": "generate_report.revenue_by_region" },
+    { "from": "calculate_top_products.top_products", "to": "generate_report.top_products" },
+    { "from": "calculate_growth_trends.trends", "to": "generate_report.trends" },
+    { "from": "generate_report.report", "to": "archive_report.report" },
+    { "from": "generate_report.report", "to": "email_report.report" },
+    { "from": "archive_report.archived", "to": "email_report.archived" }
+  ]
+}

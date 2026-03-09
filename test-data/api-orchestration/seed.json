@@ -1,0 +1,19 @@
+{
+  "users": [
+    { "id": "user_001", "name": "Alice Johnson", "email": "alice@example.com", "role": "customer", "status": "active" },
+    { "id": "user_002", "name": "Bob Smith", "email": "bob@example.com", "role": "customer", "status": "active" },
+    { "id": "user_003", "name": "Charlie Brown", "email": "charlie@example.com", "role": "admin", "status": "active" }
+  ],
+  "products": [
+    { "id": "prod_001", "name": "Wireless Headphones", "price": 79.99, "inventory": 50, "category": "electronics" },
+    { "id": "prod_002", "name": "Ergonomic Keyboard", "price": 149.99, "inventory": 25, "category": "electronics" },
+    { "id": "prod_003", "name": "Premium Monitor", "price": 899.99, "inventory": 10, "category": "electronics" },
+    { "id": "prod_004", "name": "Standing Desk", "price": 549.99, "inventory": 0, "category": "furniture" }
+  ],
+  "payment_methods": [
+    { "id": "pm_001", "user_id": "user_001", "type": "credit_card", "last_four": "4242", "valid": true },
+    { "id": "pm_002", "user_id": "user_002", "type": "credit_card", "last_four": "1234", "valid": true }
+  ],
+  "orders": [],
+  "shipments": []
+}

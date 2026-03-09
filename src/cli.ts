@@ -12,6 +12,7 @@
  */
 
 import { readFileSync, writeFileSync as fsWriteFileSync } from "fs";
+import path from "path";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { createInterface } from "readline";
@@ -721,13 +722,25 @@ async function cmdIncremental(): Promise<void> {
 
 // ─── Execute Command ─────────────────────────────────────────────────────────
 
-async function cmdExecute(filePath: string, inputsPath?: string): Promise<void> {
-  const { execute } = await import("./runtime/executor.js");
+async function cmdExecute(filePath: string, cliArgs: string[]): Promise<void> {
+  const { execute, createExecutionContext } = await import("./runtime/executor.js");
   const graph = loadGraph(filePath);
+
+  // Parse flags
+  const inputsIdx = cliArgs.indexOf("--inputs");
+  const inputsPath = inputsIdx >= 0 ? cliArgs[inputsIdx + 1] : undefined;
+  const seedIdx = cliArgs.indexOf("--seed");
+  const seedPath = seedIdx >= 0 ? cliArgs[seedIdx + 1] : undefined;
+  const contractsIdx = cliArgs.indexOf("--contracts");
+  const contractsArg = contractsIdx >= 0 ? cliArgs[contractsIdx + 1] : undefined;
+  const failuresIdx = cliArgs.indexOf("--inject-failures");
+  const failuresArg = failuresIdx >= 0 ? cliArgs[failuresIdx + 1] : undefined;
+  const useReal = cliArgs.includes("--real");
 
   let inputs: Record<string, any> = {};
   if (inputsPath) {
-    inputs = JSON.parse(readFileSync(inputsPath, "utf-8"));
+    const raw = inputsPath.startsWith("{") ? inputsPath : readFileSync(inputsPath, "utf-8");
+    inputs = JSON.parse(raw);
   }
 
   const sep = "═══════════════════════════════════════════";
@@ -737,15 +750,67 @@ async function cmdExecute(filePath: string, inputsPath?: string): Promise<void> 
   console.log(`AETHER Execution: ${graph.id} (v${graph.version})`);
   console.log(sep);
 
-  const result = await execute({
-    graph: graph as any,
-    inputs,
-    nodeImplementations: new Map(),
-    confidenceThreshold: 0.7,
-    onEffectExecuted: (node, effect) => {
-      // Effects logged in execution log
-    },
-  });
+  let result;
+
+  if (useReal) {
+    // Build seed data from seed file
+    let seedData: Record<string, Record<string, any>[]> | undefined;
+    if (seedPath) {
+      seedData = JSON.parse(readFileSync(seedPath, "utf-8"));
+    }
+
+    const contractMode = (contractsArg as "enforce" | "warn" | "skip") ?? "enforce";
+
+    // Auto-load referenced files into in-memory filesystem
+    let filesystemFiles: Record<string, string> | undefined;
+    if (inputs.file_path && seedPath) {
+      const seedDir = path.dirname(seedPath);
+      const filePath = path.join(seedDir, inputs.file_path);
+      try {
+        filesystemFiles = { [inputs.file_path]: readFileSync(filePath, "utf-8") };
+      } catch {
+        // File not found — will be caught by the implementation
+      }
+    }
+
+    const ctx = await createExecutionContext(graph as any, inputs, {
+      serviceConfig: {
+        database: seedData ? { seed: seedData } : undefined,
+        filesystem: filesystemFiles ? { files: filesystemFiles } : undefined,
+      },
+      contractMode,
+    });
+
+    // Inject failures if requested
+    if (failuresArg && ctx.services) {
+      const failConfig = failuresArg.startsWith("{") ? JSON.parse(failuresArg) : JSON.parse(readFileSync(failuresArg, "utf-8"));
+      ctx.services.injectFailures(failConfig);
+    }
+
+    // Resolve all and print resolution report
+    const resolution = ctx.registry!.resolveAll(graph as any);
+    console.log(`Mode:   REAL (${resolution.resolved.size} implementations resolved)`);
+    if (resolution.unresolved.length > 0) {
+      console.log(`Unresolved: ${resolution.unresolved.join(", ")}`);
+    }
+    console.log(`Inputs: ${JSON.stringify(inputs)}`);
+    console.log("");
+
+    result = await execute(ctx);
+  } else {
+    console.log(`Mode:   STUB`);
+    console.log(`Inputs: ${JSON.stringify(inputs)}`);
+    console.log("");
+
+    result = await execute({
+      graph: graph as any,
+      inputs,
+      nodeImplementations: new Map(),
+      confidenceThreshold: 0.7,
+      contractMode: "skip",
+      onEffectExecuted: (node, effect) => {},
+    });
+  }
 
   // Print wave-by-wave log
   let currentWave = -1;
@@ -759,11 +824,7 @@ async function cmdExecute(filePath: string, inputsPath?: string): Promise<void> 
 
     // Only print once per wave
     if (waveNodes[0] === entry.nodeId) {
-      const nodeList = waveNodes.map(id => {
-        const e = result.executionLog.find(x => x.nodeId === id)!;
-        const status = e.skipped ? "⊘" : "✓";
-        return id;
-      }).join(", ");
+      const nodeList = waveNodes.join(", ");
 
       const waveEntries = result.executionLog.filter(e => e.wave === entry.wave);
       const maxDuration = Math.max(...waveEntries.map(e => e.duration_ms));
@@ -771,12 +832,36 @@ async function cmdExecute(filePath: string, inputsPath?: string): Promise<void> 
       const anySkipped = waveEntries.some(e => e.skipped);
       const status = anySkipped ? "⊘" : "✓";
 
-      console.log(`Wave ${entry.wave}: [${nodeList}]${" ".repeat(Math.max(1, 24 - nodeList.length))}${status} ${Math.round(maxDuration)}ms  confidence: ${minConf.toFixed(2)}`);
+      const effects = waveEntries.flatMap(e => e.effects);
+      const effectStr = effects.length > 0 ? `  effects: [${[...new Set(effects)].join(", ")}]` : "";
+
+      // Contract info
+      const contractStr = useReal ? `  contracts: ✓` : "";
+
+      console.log(`Wave ${entry.wave}: [${nodeList}]${" ".repeat(Math.max(1, 24 - nodeList.length))}${status} ${Math.round(maxDuration)}ms  confidence: ${minConf.toFixed(2)}${contractStr}${effectStr}`);
+
+      // Print outputs for each node in --real mode
+      if (useReal) {
+        for (const we of waveEntries) {
+          const outputs = result.outputs[we.nodeId];
+          if (outputs) {
+            const preview = JSON.stringify(outputs);
+            const truncated = preview.length > 80 ? preview.slice(0, 77) + "..." : preview;
+            console.log(`  → ${truncated}`);
+          }
+        }
+      }
     }
   }
 
   console.log(thin);
   console.log(`Total:  ${result.nodesExecuted + result.nodesSkipped} nodes, ${result.waves} waves, ${Math.round(result.duration_ms)}ms`);
+
+  if (result.contractReport) {
+    const cr = result.contractReport;
+    console.log(`Contracts: ${cr.passed}/${cr.totalChecked} passed, ${cr.violated} violated, ${cr.unevaluable} unevaluable`);
+  }
+
   console.log(`Final confidence: ${result.confidence.toFixed(2)}`);
 
   if (result.effectsPerformed.length > 0) {
@@ -1556,14 +1641,12 @@ if (__isCliMain) {
           break;
 
         case "execute": {
-          const inputsIdx = args.indexOf("--inputs");
-          const inputsFile = inputsIdx >= 0 ? args[inputsIdx + 1] : undefined;
           if (args.includes("--jit")) {
             await cmdJIT(cliFilePath, 20, 10, args.includes("--optimize"));
           } else if (args.includes("--profile")) {
             await cmdProfile(cliFilePath, 20);
           } else {
-            await cmdExecute(cliFilePath, inputsFile);
+            await cmdExecute(cliFilePath, args);
           }
           break;
         }

@@ -1,0 +1,5 @@
+{
+  "orders": [
+    { "id": "existing_1", "customer_id": "c1", "status": "created", "items": [{ "name": "Widget", "price": 29.99 }] }
+  ]
+}

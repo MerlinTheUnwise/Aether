@@ -1,0 +1,26 @@
+{
+  "sales": [
+    { "id": "s001", "amount": 150.00, "date": "2024-01-15", "category": "electronics", "customer": "c1" },
+    { "id": "s002", "amount": 89.99, "date": "2024-01-16", "category": "clothing", "customer": "c2" },
+    { "id": "s003", "amount": 250.00, "date": "2024-01-17", "category": "electronics", "customer": "c3" },
+    { "id": "s001", "amount": 150.00, "date": "2024-01-15", "category": "electronics", "customer": "c1" },
+    { "id": "s004", "amount": 45.50, "date": "2024-01-18", "category": "books", "customer": "c1" },
+    { "id": "s005", "amount": 320.00, "date": "2024-01-19", "category": "electronics", "customer": "c4" },
+    { "id": "s006", "amount": 67.00, "date": "2024-01-20", "category": "clothing", "customer": "c5" },
+    { "id": "s007", "amount": 199.99, "date": "2024-01-21", "category": "electronics", "customer": "c2" },
+    { "id": "s008", "amount": 35.00, "date": "2024-01-22", "category": "books", "customer": "c3" },
+    { "id": "s009", "amount": 420.00, "date": "2024-01-23", "category": "electronics", "customer": "c6" },
+    { "id": "s010", "amount": 55.50, "date": "2024-01-24", "category": "clothing", "customer": "c1" },
+    { "id": "s005", "amount": 320.00, "date": "2024-01-19", "category": "electronics", "customer": "c4" },
+    { "id": "s011", "amount": 175.00, "date": "2024-01-25", "category": "electronics", "customer": "c7" },
+    { "id": "s012", "amount": 28.99, "date": "2024-01-26", "category": "books", "customer": "c2" },
+    { "id": "s013", "amount": 99.99, "date": "2024-01-27", "category": "clothing", "customer": "c8" },
+    { "id": "s014", "amount": 450.00, "date": "2024-01-28", "category": "electronics", "customer": "c3" },
+    { "id": "s015", "amount": 22.50, "date": "2024-01-29", "category": "books", "customer": "c4" },
+    { "id": "s016", "amount": 189.00, "date": "2024-01-30", "category": "electronics", "customer": "c9" },
+    { "id": "s017", "amount": 78.00, "date": "2024-01-31", "category": "clothing", "customer": "c5" },
+    { "id": "s018", "amount": 299.99, "date": "2024-02-01", "category": "electronics", "customer": "c10" },
+    { "id": "s019", "amount": 42.00, "date": "2024-02-02", "category": "books", "customer": "c6" },
+    { "id": "s020", "amount": 125.00, "date": "2024-02-03", "category": "clothing", "customer": "c7" }
+  ]
+}

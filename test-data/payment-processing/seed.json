@@ -1,0 +1,7 @@
+{
+  "orders": [
+    { "id": "order_001", "customer_id": "cust_1", "total": 99.99, "status": "pending" },
+    { "id": "order_002", "customer_id": "cust_2", "total": 249.99, "status": "pending" },
+    { "id": "order_003", "customer_id": "cust_1", "total": 49.99, "status": "completed" }
+  ]
+}

@@ -1,0 +1,191 @@
+{
+  "id": "api_orchestration",
+  "version": 1,
+  "effects": ["auth.verify", "database.read", "database.write", "payment_gateway.write", "shipping.write", "email"],
+  "metadata": {
+    "description": "E-commerce order API: JWT authentication, inventory check with reservation, payment processing with confidence-based human review, shipment creation, and email confirmation",
+    "safety_level": "standard"
+  },
+  "nodes": [
+    {
+      "id": "authenticate_user",
+      "in": {
+        "token": { "type": "String", "domain": "auth" }
+      },
+      "out": {
+        "user_id": { "type": "String", "domain": "auth" },
+        "role": { "type": "String", "domain": "auth" },
+        "authenticated": { "type": "Bool" }
+      },
+      "contract": {
+        "post": ["authenticated == true"]
+      },
+      "effects": ["auth.verify"],
+      "recovery": {
+        "invalid_token": {
+          "action": "respond",
+          "params": { "status": 401, "body": "invalid or expired token" }
+        }
+      }
+    },
+    {
+      "id": "check_inventory_api",
+      "in": {
+        "product_id": { "type": "String", "domain": "product" },
+        "quantity": { "type": "Int", "range": [1, 1000] },
+        "user_id": { "type": "String", "domain": "auth" }
+      },
+      "out": {
+        "available": { "type": "Bool" },
+        "reserved": { "type": "Bool" },
+        "unit_price": { "type": "Float", "domain": "payment", "unit": "USD" },
+        "total_price": { "type": "Float", "domain": "payment", "unit": "USD" }
+      },
+      "contract": {
+        "post": ["available == true", "reserved == true", "total_price > 0"]
+      },
+      "effects": ["database.read", "database.write"],
+      "recovery": {
+        "out_of_stock": {
+          "action": "respond",
+          "params": { "status": 409, "body": "out of stock" }
+        }
+      }
+    },
+    {
+      "id": "process_order_payment",
+      "in": {
+        "user_id": { "type": "String", "domain": "auth" },
+        "total_price": { "type": "Float", "domain": "payment", "unit": "USD" },
+        "product_id": { "type": "String", "domain": "product" }
+      },
+      "out": {
+        "payment_id": { "type": "String", "domain": "payment" },
+        "charged": { "type": "Bool" },
+        "amount": { "type": "Float", "domain": "payment", "unit": "USD" }
+      },
+      "contract": {
+        "post": ["charged == true", "amount > 0"]
+      },
+      "confidence": 0.80,
+      "adversarial_check": {
+        "break_if": ["amount > total_price * 1.1"]
+      },
+      "effects": ["payment_gateway.write"],
+      "recovery": {
+        "payment_declined": {
+          "action": "respond",
+          "params": { "status": 402, "body": "payment declined" }
+        },
+        "gateway_timeout": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        }
+      }
+    },
+    {
+      "id": "create_order_record_api",
+      "in": {
+        "user_id": { "type": "String", "domain": "auth" },
+        "product_id": { "type": "String", "domain": "product" },
+        "quantity": { "type": "Int" },
+        "payment_id": { "type": "String", "domain": "payment" },
+        "total_price": { "type": "Float", "domain": "payment", "unit": "USD" }
+      },
+      "out": {
+        "order_id": { "type": "String", "domain": "order" },
+        "status": { "type": "String" }
+      },
+      "contract": {
+        "post": ["status == \"confirmed\""]
+      },
+      "effects": ["database.write"],
+      "recovery": {
+        "write_failure": {
+          "action": "escalate",
+          "params": { "message": "failed to create order record" }
+        }
+      }
+    },
+    {
+      "id": "create_shipment_api",
+      "in": {
+        "order_id": { "type": "String", "domain": "order" },
+        "user_id": { "type": "String", "domain": "auth" },
+        "product_id": { "type": "String", "domain": "product" },
+        "quantity": { "type": "Int" }
+      },
+      "out": {
+        "shipment_id": { "type": "String", "domain": "shipping" },
+        "tracking_number": { "type": "String", "domain": "shipping" },
+        "estimated_delivery": { "type": "String" }
+      },
+      "contract": {
+        "post": ["shipment_id.length > 0"]
+      },
+      "effects": ["shipping.write", "database.write"],
+      "recovery": {
+        "shipping_unavailable": {
+          "action": "escalate",
+          "params": { "message": "shipping service unavailable" }
+        }
+      }
+    },
+    {
+      "id": "send_order_confirmation",
+      "in": {
+        "user_id": { "type": "String", "domain": "auth" },
+        "order_id": { "type": "String", "domain": "order" },
+        "tracking_number": { "type": "String", "domain": "shipping" },
+        "total_price": { "type": "Float", "domain": "payment", "unit": "USD" }
+      },
+      "out": {
+        "email_sent": { "type": "Bool" }
+      },
+      "contract": {
+        "post": ["email_sent == true"]
+      },
+      "effects": ["email"],
+      "recovery": {
+        "email_failure": {
+          "action": "retry",
+          "params": { "count": 3, "backoff": "exponential" }
+        }
+      }
+    },
+    {
+      "id": "respond_success",
+      "in": {
+        "order_id": { "type": "String", "domain": "order" },
+        "shipment_id": { "type": "String", "domain": "shipping" },
+        "email_sent": { "type": "Bool" }
+      },
+      "out": {
+        "status_code": { "type": "Int" },
+        "response": { "type": "Record" }
+      },
+      "contract": {
+        "post": ["status_code == 200"]
+      },
+      "pure": true,
+      "effects": []
+    }
+  ],
+  "edges": [
+    { "from": "authenticate_user.user_id", "to": "check_inventory_api.user_id" },
+    { "from": "check_inventory_api.total_price", "to": "process_order_payment.total_price" },
+    { "from": "authenticate_user.user_id", "to": "process_order_payment.user_id" },
+    { "from": "process_order_payment.payment_id", "to": "create_order_record_api.payment_id" },
+    { "from": "authenticate_user.user_id", "to": "create_order_record_api.user_id" },
+    { "from": "check_inventory_api.total_price", "to": "create_order_record_api.total_price" },
+    { "from": "create_order_record_api.order_id", "to": "create_shipment_api.order_id" },
+    { "from": "authenticate_user.user_id", "to": "create_shipment_api.user_id" },
+    { "from": "create_order_record_api.order_id", "to": "send_order_confirmation.order_id" },
+    { "from": "authenticate_user.user_id", "to": "send_order_confirmation.user_id" },
+    { "from": "create_shipment_api.tracking_number", "to": "send_order_confirmation.tracking_number" },
+    { "from": "check_inventory_api.total_price", "to": "send_order_confirmation.total_price" },
+    { "from": "create_order_record_api.order_id", "to": "respond_success.order_id" },
+    { "from": "create_shipment_api.shipment_id", "to": "respond_success.shipment_id" },
+    { "from": "send_order_confirmation.email_sent", "to": "respond_success.email_sent" }
+  ]
+}

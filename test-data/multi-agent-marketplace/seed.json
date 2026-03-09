@@ -1,0 +1,12 @@
+{
+  "sellers": [
+    { "id": "seller_1", "name": "Top Seller", "rating": 4.8 },
+    { "id": "seller_2", "name": "New Seller", "rating": 3.5 }
+  ],
+  "listings": [
+    { "id": "lst_1", "seller_id": "seller_1", "name": "Artisan Widget", "price": 59.99 },
+    { "id": "lst_2", "seller_id": "seller_2", "name": "Budget Gadget", "price": 19.99 }
+  ],
+  "orders": [],
+  "reviews": []
+}

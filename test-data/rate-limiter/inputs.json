@@ -1,0 +1,6 @@
+{
+  "client_id": "client_001",
+  "endpoint": "/api/data",
+  "window_seconds": 60,
+  "max_requests": 100
+}

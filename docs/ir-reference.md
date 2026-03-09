@@ -286,3 +286,26 @@ propagated_confidence(node) = node.confidence × min(input_confidences)
 **Supervised blocks:** Contracts are asserted but not proven. Tracked as unverified. Contribute 0% to verification score.
 
 **Verification percentage:** `verified_nodes / (verified_nodes + failed_nodes)`. Unsupported and supervised nodes are excluded from the denominator.
+
+## Implementations
+
+Nodes get their implementations through a 3-level resolution system:
+
+### 1. Registry-Based Resolution
+The `ImplementationRegistry` resolves node IDs to implementation functions:
+
+- **Exact ID match** — `registry.registerById("fetch_csv_data", impl)` matches nodes with `id: "fetch_csv_data"`
+- **Pattern match** — `registry.registerByPattern(/pattern/, impl)` matches node IDs against a regex (used for template-prefixed IDs like `user_crud_validate_input`)
+- **Type signature match** — `registry.registerBySignature(inputTypes, outputTypes, impl)` matches by I/O type compatibility
+- **User overrides** — `registry.override(nodeId, impl)` takes highest priority
+
+### 2. Service Container
+Effectful implementations access services via dependency injection:
+
+- `context.getService<AetherDatabase>("database")` — In-memory database with seed support
+- `context.getService<AetherFileSystem>("filesystem")` — Sandboxed filesystem for file I/O
+- `context.getService<AetherEmailService>("email")` — Email capture service
+- `context.getService<AetherMLService>("ml")` — Rule-based ML classification
+
+### 3. Stub Mode Fallback
+When no implementation is found, the executor generates typed defaults for all output ports. Contracts are skipped in stub mode since defaults won't satisfy real contracts.

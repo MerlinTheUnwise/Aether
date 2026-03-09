@@ -1,0 +1,9 @@
+{
+  "transactions": [
+    { "id": "t1", "amount": 150.00, "date": "2024-01-15", "type": "sale" },
+    { "id": "t2", "amount": 89.99, "date": "2024-01-16", "type": "sale" },
+    { "id": "t3", "amount": 250.00, "date": "2024-01-17", "type": "sale" },
+    { "id": "t4", "amount": 45.50, "date": "2024-01-18", "type": "refund" },
+    { "id": "t5", "amount": 320.00, "date": "2024-01-19", "type": "sale" }
+  ]
+}

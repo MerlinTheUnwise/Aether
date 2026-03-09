@@ -1,0 +1,6 @@
+{
+  "quotas": [
+    { "id": "q_client_001", "client_id": "client_001", "count": 5, "endpoint": "/api/data" },
+    { "id": "q_client_002", "client_id": "client_002", "count": 95, "endpoint": "/api/data" }
+  ]
+}

@@ -392,6 +392,48 @@ Using a stdlib template:
 
 **Available stdlib templates:** `crud-entity`, `retry-with-fallback`, `auth-gate`, `confidence-cascade`.
 
+## Pattern 13: Real-World Data Pipeline
+
+A complete sales analytics pipeline processing 500 CSV rows through validation, deduplication, anomaly detection, parallel analytics, report generation, archival, and email delivery.
+
+**10 nodes, 3 parallel waves in the analytics section, 4 effect types.**
+
+```
+fetch_csv_data → validate_records → clean_and_normalize → detect_anomalies →┐
+    ├→ calculate_revenue_by_region →┐                                        │
+    ├→ calculate_top_products ──────├→ generate_report → archive_report → email_report
+    └→ calculate_growth_trends ────┘
+```
+
+Key patterns:
+- **Filesystem effects** for CSV ingestion and report archival
+- **ML inference** for anomaly detection with `confidence: 0.82` and adversarial check
+- **Parallel analytics** — 3 independent calculations run in a single wave
+- **Cascading recovery** — archive failure escalates; email failure retries 3x
+- **Precondition gate** — `email_report` requires `archived == true`
+
+See `src/ir/examples/real-world/sales-analytics.json` for the complete IR.
+
+## Pattern 14: Real-World API Orchestration
+
+An e-commerce order API: JWT authentication, inventory reservation, payment processing, shipment creation, and email confirmation.
+
+**7 nodes across 4 waves.**
+
+```
+authenticate_user → check_inventory_api → process_order_payment → create_order_record_api →┐
+                                                                                            ├→ respond_success
+    create_shipment_api → send_order_confirmation ──────────────────────────────────────────┘
+```
+
+Key patterns:
+- **Respond recovery** — auth failure returns 401, out of stock returns 409, payment declined returns 402
+- **Retry recovery** — payment gateway timeout retries 3x with exponential backoff
+- **Confidence-based oversight** — payment processing has `confidence: 0.80` with adversarial check on overcharge
+- **Effect variety** — auth.verify, database.read/write, payment_gateway.write, shipping.write, email
+
+See `src/ir/examples/real-world/api-orchestration.json` for the complete IR.
+
 ## Generation Self-Check
 
 Before submitting generated IR, verify:

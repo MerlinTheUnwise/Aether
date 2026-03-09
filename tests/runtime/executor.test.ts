@@ -355,8 +355,9 @@ describe("evaluateContract", () => {
     expect(evaluateContract("name.length > 0", { name: "" })).toBe(false);
   });
 
-  it("unsupported expressions return true (assume passing)", () => {
+  it("quantifier expressions are now properly evaluated", () => {
+    // New evaluator handles quantifiers — no more silent passes
     expect(evaluateContract("∀x ∈ S: x > 0", { S: [1, 2, 3] })).toBe(true);
-    expect(evaluateContract("exists(users, email)", { users: [], email: "a" })).toBe(true);
+    expect(evaluateContract("∀x ∈ S: x > 0", { S: [1, -2, 3] })).toBe(false);
   });
 });
