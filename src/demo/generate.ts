@@ -868,12 +868,56 @@ function loadExample(idx) {
   processProgram(ex.program);
 }
 
+let demoShowAether = true;
+
+function graphToAetherDemo(g) {
+  let out = 'graph ' + (g.id || 'untitled') + ' v' + (g.version || 1) + '\\n';
+  if (g.effects && g.effects.length > 0) out += '  effects: [' + g.effects.join(', ') + ']\\n';
+  out += '\\n';
+  for (const n of (g.nodes || [])) {
+    if (n.hole) { out += '  hole ' + n.id + '\\n  end\\n\\n'; continue; }
+    if (n.intent) { out += '  intent ' + n.id + '\\n  end\\n\\n'; continue; }
+    out += '  node ' + n.id + '\\n';
+    if (n.in) out += '    in:  ' + Object.entries(n.in).map(function([k,v]){return k+': '+(v.type||'String')}).join(', ') + '\\n';
+    if (n.out) out += '    out: ' + Object.entries(n.out).map(function([k,v]){return k+': '+(v.type||'String')}).join(', ') + '\\n';
+    if (n.effects && n.effects.length > 0) out += '    effects: [' + n.effects.join(', ') + ']\\n';
+    if (n.contract) {
+      out += '    contracts:\\n';
+      for (const p of (n.contract.pre || [])) out += '      pre:  ' + p + '\\n';
+      for (const p of (n.contract.post || [])) out += '      post: ' + p + '\\n';
+    }
+    if (n.confidence !== undefined) out += '    confidence: ' + n.confidence + '\\n';
+    if (n.pure) out += '    pure\\n';
+    if (n.recovery) {
+      out += '    recovery:\\n';
+      for (const [k, v] of Object.entries(n.recovery)) {
+        let args = v.params ? '(' + Object.entries(v.params).map(function([pk,pv]){return pk+': '+pv}).join(', ') + ')' : '';
+        out += '      ' + k + ' -> ' + v.action + args + '\\n';
+      }
+    }
+    out += '  end\\n\\n';
+  }
+  for (const e of (g.edges || [])) out += '  edge ' + e.from + ' -> ' + e.to + '\\n';
+  out += '\\nend\\n';
+  return out;
+}
+
+function toggleDemoFormat() {
+  demoShowAether = !demoShowAether;
+  const el = document.getElementById("generated-json");
+  const btn = document.getElementById("toggle-format-btn");
+  if (currentProgram) {
+    el.textContent = demoShowAether ? graphToAetherDemo(currentProgram) : JSON.stringify(currentProgram, null, 2);
+    btn.textContent = demoShowAether ? "Show JSON" : "Show .aether";
+  }
+}
+
 function processProgram(program) {
   currentProgram = program;
 
-  // Step 2: Show generated JSON
+  // Step 2: Show generated output (.aether by default, toggle for JSON)
   showStep(2);
-  document.getElementById("generated-json").textContent = JSON.stringify(program, null, 2);
+  document.getElementById("generated-json").textContent = demoShowAether ? graphToAetherDemo(program) : JSON.stringify(program, null, 2);
   document.getElementById("generation-time").textContent = "Loaded from example";
 
   // Step 3: Validate
@@ -1174,6 +1218,7 @@ function demoHTML(css: string, js: string): string {
     <div class="step-header">
       <div class="step-number">2</div>
       <div class="step-title">Generate</div>
+      <button class="btn" id="toggle-format-btn" onclick="toggleDemoFormat()" style="margin-left:auto;font-size:11px;padding:4px 10px">Show JSON</button>
     </div>
     <div class="step-content">
       <div class="json-display" id="generated-json"></div>

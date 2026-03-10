@@ -10,10 +10,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "ajv": "^8.17.1",
-    "better-sqlite3": "^12.6.2",
     "z3-solver": "^4.13.3"
+  },
+  "optionalDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",

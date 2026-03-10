@@ -213,10 +213,11 @@ export class GraphOptimizer {
   }
 
   /** Apply all auto-applicable suggestions */
-  applyAll(graph: AetherGraph): { graph: AetherGraph; applied: string[]; skipped: string[] } {
+  applyAll(graph: AetherGraph): { graph: AetherGraph; applied: string[]; skipped: string[]; modifications: string[] } {
     let current: AetherGraph = JSON.parse(JSON.stringify(graph));
     const applied: string[] = [];
     const skipped: string[] = [];
+    const modifications: string[] = [];
 
     // Analyze once, apply all auto-applicable ones in order
     const suggestions = this.analyze(current);
@@ -225,15 +226,17 @@ export class GraphOptimizer {
         try {
           current = this.apply(current, s.id);
           applied.push(s.id);
-        } catch {
+          modifications.push(`Applied ${s.type}: ${s.description}`);
+        } catch (e) {
           skipped.push(s.id);
+          modifications.push(`Skipped ${s.id}: ${(e as Error).message}`);
         }
       } else {
         skipped.push(s.id);
       }
     }
 
-    return { graph: current, applied, skipped };
+    return { graph: current, applied, skipped, modifications };
   }
 
   // ─── Analysis Rules ─────────────────────────────────────────────────────

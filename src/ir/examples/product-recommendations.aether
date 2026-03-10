@@ -1,0 +1,59 @@
+graph get_product_recommendations v2
+  effects: [database.read, cache.read_write, ml_model.infer]
+
+  metadata:
+    sla:
+      latency_ms: 200
+      availability: 99.9
+
+  // ─── Nodes ───
+
+  node authenticate
+    in:  token: String @jwt @internal
+    out: user: AuthenticatedUser @auth @pii
+    effects: [database.read]
+    contracts:
+      pre:  token.length > 0
+      post: user.id != null
+      post: user.authenticated == true
+    recovery:
+      invalid_token -> respond(401)
+      expired -> respond(401)
+  end
+
+  node fetch_history
+    in:  user: AuthenticatedUser @auth @pii
+    out: purchases: List<Product> @commerce, views: List<Product> @commerce
+    effects: [database.read, cache.read_write]
+    contracts:
+      post: purchases is_subset_of all_products
+      post: views is_subset_of all_products
+    recovery:
+      cache_miss -> fallback(strategy: database_fallback)
+      db_timeout -> respond
+  end
+
+  node generate_recommendations
+    in:  purchases: List<Product> @commerce, views: List<Product> @commerce
+    out: recommended: List<Product> @commerce @constraint("size in 10..20")
+    effects: [ml_model.infer]
+    contracts:
+      post: forall(p, recommended, p not_in purchases)
+      post: recommended.is_distinct
+      post: recommended.size >= 10 && recommended.size <= 20
+    recovery:
+      model_timeout -> fallback(strategy: popular_products, confidence: 0.5)
+      model_error -> escalate("recommendation model unavailable")
+    adversarial:
+      break_if: intersection(recommended, purchases) != empty
+      break_if: recommended.has_duplicates
+    confidence: 0.85
+  end
+
+  // ─── Edges ───
+
+  edge authenticate.user -> fetch_history.user
+  edge fetch_history.purchases -> generate_recommendations.purchases
+  edge fetch_history.views -> generate_recommendations.views
+
+end // graph

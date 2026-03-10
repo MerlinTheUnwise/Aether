@@ -1,0 +1,113 @@
+// Order lifecycle with temporal state types demonstrating verified state machine transitions
+//
+
+graph order_lifecycle v1
+  effects: [database.write, payment_gateway.write, shipping.write, email]
+
+  metadata:
+    description: "Order lifecycle with temporal state types demonstrating verified state machine transitions"
+    safety_level: high
+
+  statetype OrderLifecycle
+    states: [created, paid, shipped, delivered, cancelled, refunded]
+    transitions:
+      created -> paid when payment_confirmed
+      created -> cancelled when customer_cancelled
+      paid -> shipped when shipment_dispatched
+      paid -> refunded when refund_requested
+      shipped -> delivered when delivery_confirmed
+      delivered -> refunded when return_approved
+    never:
+      cancelled -> paid
+      delivered -> shipped
+    terminal: [cancelled, refunded]
+    initial: created
+  end
+
+  // ─── Nodes ───
+
+  node create_order
+    in:  customer_id: String @commerce, items: List<Product> @commerce
+    out: order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle")
+    effects: [database.write]
+    contracts:
+      pre:  customer_id.length > 0
+      post: status == "created"
+    recovery:
+      database_error -> retry(exponential)
+    confidence: 0.99
+  end
+
+  node process_payment
+    in:  order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle"), amount: Float64 @USD
+    out: payment_id: String @uuid @payment, status: String @commerce @state_type("OrderLifecycle")
+    effects: [payment_gateway.write, database.write]
+    contracts:
+      pre:  amount > 0
+      post: status == "paid"
+    recovery:
+      payment_declined -> respond(declined, "Payment was declined")
+      gateway_timeout -> retry(exponential)
+    confidence: 0.95
+  end
+
+  node ship_order
+    in:  order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle"), payment_id: String @uuid @payment
+    out: tracking_id: String, status: String @commerce @state_type("OrderLifecycle")
+    effects: [shipping.write, database.write]
+    contracts:
+      pre:  order_id.length > 0
+      post: status == "shipped"
+    recovery:
+      shipping_unavailable -> escalate("No shipping carriers available")
+    confidence: 0.92
+  end
+
+  node confirm_delivery
+    in:  order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle"), tracking_id: String
+    out: delivered_at: String @iso8601, status: String @commerce @state_type("OrderLifecycle")
+    effects: [database.write, email]
+    contracts:
+      pre:  tracking_id.length > 0
+      post: status == "delivered"
+    recovery:
+      delivery_failed -> retry(exponential)
+    confidence: 0.9
+  end
+
+  node handle_cancellation
+    in:  order_id: String @uuid @commerce, reason: String
+    out: cancelled_at: String @iso8601, status: String @commerce @state_type("OrderLifecycle")
+    effects: [database.write, email]
+    contracts:
+      pre:  order_id.length > 0
+      post: status == "cancelled"
+    recovery:
+      cancellation_error -> retry(exponential)
+    confidence: 0.98
+  end
+
+  node process_refund
+    in:  order_id: String @uuid @commerce, payment_id: String @uuid @payment, reason: String
+    out: refund_id: String @uuid @payment, status: String @commerce @state_type("OrderLifecycle")
+    effects: [payment_gateway.write, database.write, email]
+    contracts:
+      pre:  payment_id.length > 0
+      post: status == "refunded"
+    recovery:
+      refund_failed -> escalate("Refund processing failed")
+    confidence: 0.93
+  end
+
+  // ─── Edges ───
+
+  edge create_order.order_id -> process_payment.order_id
+  edge create_order.status -> process_payment.status
+  edge process_payment.payment_id -> ship_order.payment_id
+  edge create_order.order_id -> ship_order.order_id
+  edge process_payment.status -> ship_order.status
+  edge create_order.order_id -> confirm_delivery.order_id
+  edge ship_order.status -> confirm_delivery.status
+  edge ship_order.tracking_id -> confirm_delivery.tracking_id
+
+end // graph

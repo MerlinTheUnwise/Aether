@@ -7,16 +7,162 @@
 
 AETHER is a programming language where programs are **computation graphs** (directed acyclic graphs), not linear text. Every node in the graph carries typed inputs/outputs, machine-verifiable contracts, confidence annotations, declared effects, and recovery strategies.
 
-Programs are represented as JSON (AETHER-IR), validated by a schema, type-checked for semantic correctness, verified by Z3 for contract satisfaction, and executed by a parallel graph runtime. They can also be compiled to native binaries via LLVM.
+Programs are written in `.aether` surface syntax (human-readable) or represented as JSON IR (machine-optimized). Both formats are validated by the schema, type-checked for semantic correctness, verified by Z3 for contract satisfaction, and executed by a parallel graph runtime. Programs can also be compiled to native binaries via LLVM.
 
-**AETHER is AI-first.** Humans declare intent. AI generates AETHER-IR. Machines verify and execute. No human ever needs to read or write AETHER directly.
+**AETHER is AI-first.** Humans declare intent. AI generates programs. Machines verify and execute. The `.aether` format is the primary authoring format; JSON IR is the intermediate representation used internally by tools.
+
+## Writing AETHER Programs
+
+Here is a quick tour of the `.aether` surface syntax. Every concept shown here maps directly to the JSON IR, but `.aether` is far more concise and readable.
+
+### Minimal Program
+
+```aether
+graph hello_world v1
+  effects: []
+
+  node greet
+    in:  name: String
+    out: greeting: String
+    contracts:
+      post: greeting.length > 0
+    pure
+  end
+
+end // graph
+```
+
+### Nodes with Effects, Recovery, and Contracts
+
+```aether
+node check_uniqueness
+  in:  email: String @email @auth @pii
+  out: unique: Bool
+  effects: [database.read]
+  contracts:
+    post: unique <=> !exists(users, email)
+  recovery:
+    db_timeout -> retry(3, exponential)
+    db_error -> fallback(assume_unique: false)
+end
+```
+
+### Type Annotations
+
+Annotations enrich types with semantic metadata using `@` shorthand:
+
+```aether
+in:  amount: Float64 @USD @range(0.01, 999999.99)
+in:  token: String @jwt @internal
+out: user: Record @auth @pii
+in:  order: Record @state_type("OrderLifecycle")
+in:  action: String @constraint("> 0.9")
+```
+
+### Edges
+
+```aether
+edge validate_email.normalized -> check_uniqueness.email
+edge check_uniqueness.unique -> create_user.unique
+```
+
+### Intent Nodes (Layer 3)
+
+```aether
+intent sort_results
+  in:  collection: List<Transaction>
+  out: sorted: List<Transaction>
+  ensure: output is sorted by date
+  ensure: output is permutation of input
+  constraints:
+    time_complexity: O(n log n)
+    deterministic: true
+end
+```
+
+### State Types
+
+```aether
+statetype OrderLifecycle
+  states: [created, paid, shipped, delivered, cancelled, refunded]
+  transitions:
+    created -> paid when payment_confirmed
+    created -> cancelled when customer_cancelled
+    paid -> shipped when shipment_dispatched
+  never:
+    cancelled -> paid
+    delivered -> shipped
+  terminal: [cancelled, refunded]
+  initial: created
+end
+```
+
+### Templates and Instantiation
+
+```aether
+template crud-entity
+  params:
+    $Entity: type
+    $IdType: type
+    $storage_effect: effect
+
+  node validate_input
+    in:  data: $Entity
+    out: validated: $Entity
+    contracts:
+      post: output.validated != null
+    pure
+  end
+
+  // ... more nodes and edges ...
+end
+
+use crud-entity as user_crud
+  Entity = Record @auth
+  IdType = String @uuid
+  storage_effect = database.write
+end
+```
+
+### Adversarial Checks
+
+```aether
+node authorize_card
+  in:  amount: Float64 @USD
+  out: authorized: Float64 @USD, status: String @payment
+  effects: [payment_gateway.write]
+  contracts:
+    post: authorized == amount
+  adversarial:
+    break_if: authorized != amount
+    break_if: status == captured
+  confidence: 0.8
+  recovery:
+    gateway_timeout -> retry(exponential)
+end
+```
+
+### Graph Metadata and SLA
+
+```aether
+graph payment_api v1
+  effects: [payment_gateway.write, database.write]
+
+  metadata:
+    description: "Payment processing API"
+    safety_level: high
+    human_oversight: "confidence < 0.7"
+    sla:
+      latency_ms: 200
+      availability: 99.9
+```
 
 ## The Nine Pillars
 
 Every design decision in AETHER traces back to one of these principles:
 
 ### 1. Graph-Native
-Programs are DAGs, not text files. No syntax errors possible — a program is structurally valid JSON or it isn't. No brackets to mismatch, no indentation bugs, no semicolons.
+Programs are DAGs, not text files. The `.aether` surface syntax uses a clean, keyword-based structure (`graph`, `node`, `edge`, `end`) that maps 1:1 to the JSON IR. Both formats are structurally validated.
 
 ### 2. Contract-Verified
 Every node carries preconditions, postconditions, and invariants. These are contracts verified by Z3 (arithmetic, boolean, comparisons, implication). Complex expressions fall back to runtime evaluation. Optional Lean 4 proof skeleton export is available for manual completion.
@@ -47,6 +193,16 @@ Large programs decompose into scopes with boundary contracts. AI loads only the 
 ### Layer 3 — Intent
 Declare desired properties and outcomes. The runtime resolves these to certified implementations.
 
+```aether
+intent sort_results
+  in:  data: List<Record>
+  out: sorted: List<Record>
+  ensure: output is sorted ascending by date
+end
+```
+
+<details><summary>IR equivalent (JSON)</summary>
+
 ```json
 {
   "id": "sort_results",
@@ -57,8 +213,24 @@ Declare desired properties and outcomes. The runtime resolves these to certified
 }
 ```
 
+</details>
+
 ### Layer 2 — Structural
 Construct computation graphs with full contracts. This is the primary working layer where most programs live.
+
+```aether
+node validate_email
+  in:  email: String @email
+  out: normalized: String @email @auth
+  contracts:
+    pre:  email.length > 0
+    post: normalized.is_lowercase
+  pure
+  confidence: 0.99
+end
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 {
@@ -71,6 +243,8 @@ Construct computation graphs with full contracts. This is the primary working la
   "confidence": 0.99
 }
 ```
+
+</details>
 
 ### Layer 1 — Constructive
 Build new verified algorithms when needed. These join the certified library for future intent resolution.

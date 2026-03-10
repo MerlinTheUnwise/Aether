@@ -21,20 +21,39 @@ Every TypeAnnotation in AETHER can carry semantic metadata beyond the base type.
 
 ### Semantic Annotations
 
+In `.aether` surface syntax, annotations are written with `@` shorthand directly after the base type. In JSON IR, they are fields on the TypeAnnotation object.
+
 #### `domain`
 Encodes what conceptual domain a value belongs to. Values from different domains are incompatible even if their base types match.
+
+```aether
+in:  user_id: String @auth
+in:  product_id: String @commerce
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 { "type": "String", "domain": "authentication" }
 { "type": "String", "domain": "commerce" }
 ```
 
-A `UserID` (domain: authentication) CANNOT flow to a `ProductID` (domain: commerce) port — the type checker rejects it as `DOMAIN_MISMATCH`.
+</details>
+
+A `UserID` (domain: authentication) CANNOT flow to a `ProductID` (domain: commerce) port -- the type checker rejects it as `DOMAIN_MISMATCH`.
 
 Common domains: `authentication`, `commerce`, `payment`, `ml`, `support`, `moderation`, `logistics`, `notification`.
 
 #### `dimension` and `unit`
 Encode physical or conceptual dimensions with units. Values with different dimensions cannot be combined. Values with the same dimension but different units trigger a warning with auto-convert suggestion.
+
+```aether
+in:  temperature: Float64 @celsius
+in:  price: Float64 @USD
+in:  latency: Float64 @ms
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 { "type": "Float64", "dimension": "thermodynamic_temperature", "unit": "celsius" }
@@ -42,11 +61,21 @@ Encode physical or conceptual dimensions with units. Values with different dimen
 { "type": "Float64", "dimension": "time", "unit": "ms" }
 ```
 
-`Temperature + Money` → ERROR: dimension mismatch.
-`celsius + kelvin` → WARNING: unit mismatch (auto-convert available).
+</details>
+
+`Temperature + Money` -> ERROR: dimension mismatch.
+`celsius + kelvin` -> WARNING: unit mismatch (auto-convert available).
 
 #### `format`
 Constrains the string format.
+
+```aether
+in:  email: String @email
+in:  id: String @uuid
+in:  token: String @jwt
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 { "type": "String", "format": "email" }
@@ -54,8 +83,18 @@ Constrains the string format.
 { "type": "String", "format": "jwt" }
 ```
 
+</details>
+
 #### `sensitivity`
 Tracks data sensitivity for privacy compliance. PII data cannot flow to public-scoped ports.
+
+```aether
+in:  ssn: String @pii
+in:  label: String @public
+in:  token: String @internal
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 { "type": "String", "sensitivity": "pii" }
@@ -63,34 +102,138 @@ Tracks data sensitivity for privacy compliance. PII data cannot flow to public-s
 { "type": "String", "sensitivity": "internal" }
 ```
 
-`pii → public` → ERROR: sensitivity violation.
-`pii → internal` → OK.
-`internal → public` → OK.
-`public → pii` → OK (upgrading sensitivity is safe).
+</details>
+
+`pii -> public` -> ERROR: sensitivity violation.
+`pii -> internal` -> OK.
+`internal -> public` -> OK.
+`public -> pii` -> OK (upgrading sensitivity is safe).
 
 #### `range`
 Constrains numeric values.
+
+```aether
+in:  percentage: Int @range(0, 100)
+in:  probability: Float64 @range(0.0, 1.0)
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 { "type": "Int", "range": [0, 100] }
 { "type": "Float64", "range": [0.0, 1.0] }
 ```
 
+</details>
+
 #### `constraint`
-Arbitrary value constraint. Primarily used for **confidence gates** — preventing low-confidence values from entering high-stakes nodes.
+Arbitrary value constraint. Primarily used for **confidence gates** -- preventing low-confidence values from entering high-stakes nodes.
+
+```aether
+in:  action: String @constraint("> 0.7")
+in:  verified: Bool @constraint("= true")
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 { "type": "String", "constraint": "> 0.7" }
 { "type": "Bool", "constraint": "= true" }
 ```
 
-A port with `constraint: "> 0.9"` structurally prevents any value with propagated confidence ≤ 0.9 from flowing in.
+</details>
+
+A port with `@constraint("> 0.9")` structurally prevents any value with propagated confidence <= 0.9 from flowing in.
 
 #### `state_type`
 Links a port to a declared StateType. See Temporal State Types below.
 
+```aether
+in:  order: Record @state_type("OrderLifecycle")
+```
+
+<details><summary>IR equivalent (JSON)</summary>
+
 ```json
 { "type": "Record", "state_type": "OrderLifecycle" }
+```
+
+</details>
+
+## Annotation Reference
+
+The `.aether` surface syntax provides `@annotation` shorthand that expands to IR TypeAnnotation fields. Here is the complete list of supported annotations:
+
+### Format Annotations
+
+| Annotation | IR Expansion | Example |
+|---|---|---|
+| `@email` | `"format": "email"` | `in: addr: String @email` |
+| `@uuid` | `"format": "uuid_v4"` | `in: id: String @uuid` |
+| `@jwt` | `"format": "jwt"` | `in: token: String @jwt` |
+| `@phone` | `"format": "phone"` | `in: number: String @phone` |
+| `@url` | `"format": "url"` | `in: link: String @url` |
+| `@iso8601` | `"format": "iso8601"` | `in: ts: String @iso8601` |
+
+### Domain Annotations
+
+| Annotation | IR Expansion | Example |
+|---|---|---|
+| `@auth` | `"domain": "authentication"` | `in: user: Record @auth` |
+| `@commerce` | `"domain": "commerce"` | `in: product: Record @commerce` |
+| `@payment` | `"domain": "payment"` | `in: amount: Float64 @payment` |
+| `@ml` | `"domain": "ml"` | `in: features: List<Float64> @ml` |
+| `@support` | `"domain": "support"` | `in: ticket: Record @support` |
+| `@mod` | `"domain": "moderation"` | `in: content: String @mod` |
+
+### Sensitivity Annotations
+
+| Annotation | IR Expansion | Example |
+|---|---|---|
+| `@pii` | `"sensitivity": "pii"` | `in: ssn: String @pii` |
+| `@public` | `"sensitivity": "public"` | `out: label: String @public` |
+| `@internal` | `"sensitivity": "internal"` | `in: token: String @internal` |
+
+### Unit Annotations (with auto-dimension)
+
+| Annotation | IR Expansion | Example |
+|---|---|---|
+| `@USD` | `"unit": "USD", "dimension": "currency"` | `in: price: Float64 @USD` |
+| `@EUR` | `"unit": "EUR", "dimension": "currency"` | `in: price: Float64 @EUR` |
+| `@GBP` | `"unit": "GBP", "dimension": "currency"` | `in: price: Float64 @GBP` |
+| `@kelvin` | `"unit": "kelvin", "dimension": "thermodynamic_temperature"` | `in: temp: Float64 @kelvin` |
+| `@celsius` | `"unit": "celsius", "dimension": "thermodynamic_temperature"` | `in: temp: Float64 @celsius` |
+| `@ms` | `"unit": "ms", "dimension": "time"` | `in: latency: Float64 @ms` |
+| `@seconds` | `"unit": "seconds", "dimension": "time"` | `in: duration: Float64 @seconds` |
+| `@bytes` | `"unit": "bytes", "dimension": "data_size"` | `in: size: Int @bytes` |
+| `@percent` | `"unit": "percent", "dimension": "ratio"` | `in: rate: Float64 @percent` |
+
+### Parameterized Annotations
+
+| Annotation | IR Expansion | Example |
+|---|---|---|
+| `@constraint("expr")` | `"constraint": "expr"` | `in: action: String @constraint("> 0.9")` |
+| `@range(min, max)` | `"range": [min, max]` | `in: score: Int @range(0, 100)` |
+| `@state_type("name")` | `"state_type": "name"` | `in: order: Record @state_type("OrderLifecycle")` |
+
+### Stacking Annotations
+
+Multiple annotations can be combined on a single port. They are applied left-to-right:
+
+```aether
+in:  email: String @email @auth @pii
+// Expands to: { "type": "String", "format": "email", "domain": "authentication", "sensitivity": "pii" }
+
+in:  amount: Float64 @USD @range(0.01, 999999.99)
+// Expands to: { "type": "Float64", "unit": "USD", "dimension": "currency", "range": [0.01, 999999.99] }
+```
+
+### Custom Domain/Dimension/Unit
+
+For domains, dimensions, or units not covered by the built-in annotations, use the JSON IR directly and convert with `format`:
+
+```json
+{ "type": "Float64", "dimension": "mass", "unit": "kg" }
 ```
 
 ## Temporal State Types
@@ -98,6 +241,26 @@ Links a port to a declared StateType. See Temporal State Types below.
 State machines as first-class types with Z3-verified transitions.
 
 ### Declaration
+
+```aether
+statetype OrderLifecycle
+  states: [created, paid, shipped, delivered, cancelled, refunded]
+  transitions:
+    created -> paid when payment_confirmed
+    created -> cancelled when user_request
+    paid -> shipped when carrier_accepted
+    paid -> refunded when user_request
+    shipped -> delivered when carrier_confirmed
+    delivered -> refunded when user_request
+  never:
+    cancelled -> paid
+    delivered -> shipped
+  terminal: [delivered, cancelled, refunded]
+  initial: created
+end
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 {
@@ -124,6 +287,8 @@ State machines as first-class types with Z3-verified transitions.
 }
 ```
 
+</details>
+
 ### Verification
 
 Z3 proves:
@@ -141,7 +306,16 @@ State types become inductive types with transition relations and impossibility t
 
 ## Dependent Types
 
-AETHER supports lightweight dependent types via `constraint` annotations on input ports.
+AETHER supports lightweight dependent types via `@constraint` annotations on input ports.
+
+```aether
+node create_user
+  in:  email: String, unique: Bool @constraint("= true")
+  // ...
+end
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 {
@@ -153,11 +327,22 @@ AETHER supports lightweight dependent types via `constraint` annotations on inpu
 }
 ```
 
-The `constraint: "= true"` means this port can only receive a value that has been verified as `true` by a preceding node. If `check_uniqueness.unique` is wired to `create_user.unique`, the type system ensures the uniqueness check has been performed before user creation can proceed.
+</details>
 
-This is not full dependent typing (no Π-types or Σ-types). It's a practical, verifiable constraint system that prevents "use before check" bugs.
+The `@constraint("= true")` means this port can only receive a value that has been verified as `true` by a preceding node. If `check_uniqueness.unique` is wired to `create_user.unique`, the type system ensures the uniqueness check has been performed before user creation can proceed.
+
+This is not full dependent typing (no Pi-types or Sigma-types). It's a practical, verifiable constraint system that prevents "use before check" bugs.
 
 ### Confidence Gates as Dependent Types
+
+```aether
+node execute_action
+  in:  action: String @constraint("> 0.9")
+  // ...
+end
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 {
@@ -167,7 +352,9 @@ This is not full dependent typing (no Π-types or Σ-types). It's a practical, v
 }
 ```
 
-This input port requires propagated confidence above 0.9. At runtime, if the upstream node's confidence × its own confidence doesn't exceed 0.9, the executor either skips the node or routes to human oversight. The gate is structural — not a runtime check that might be forgotten.
+</details>
+
+This input port requires propagated confidence above 0.9. At runtime, if the upstream node's confidence * its own confidence doesn't exceed 0.9, the executor either skips the node or routes to human oversight. The gate is structural -- not a runtime check that might be forgotten.
 
 ## Pattern Templates
 
@@ -186,6 +373,16 @@ Parameters are referenced with `$` prefix in template nodes.
 
 ### Instantiation
 
+```aether
+use crud-entity as user_crud
+  Entity = Record @auth
+  IdType = String @uuid
+  storage_effect = database.write
+end
+```
+
+<details><summary>IR equivalent (JSON)</summary>
+
 ```json
 {
   "template_instances": [{
@@ -199,6 +396,8 @@ Parameters are referenced with `$` prefix in template nodes.
   }]
 }
 ```
+
+</details>
 
 ### Instantiation Verification
 

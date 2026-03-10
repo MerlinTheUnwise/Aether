@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { join, dirname, extname } from "path";
 import { fileURLToPath } from "url";
 
@@ -39,7 +39,7 @@ describe("Naming Consistency", () => {
     ...docFiles,
     readmePath,
     claudePath,
-    designPath,
+    ...(existsSync(designPath) ? [designPath] : []),
   ];
 
   it("no source or doc file contains 'AI-driven'", () => {

@@ -1,0 +1,15 @@
+{
+  "comments": { "lineComment": "//" },
+  "brackets": [["[", "]"], ["(", ")"]],
+  "autoClosingPairs": [
+    { "open": "[", "close": "]" },
+    { "open": "(", "close": ")" },
+    { "open": "\"", "close": "\"" }
+  ],
+  "folding": {
+    "markers": {
+      "start": "\\b(graph|node|hole|intent|scope|template|statetype|use)\\b",
+      "end": "\\bend\\b"
+    }
+  }
+}

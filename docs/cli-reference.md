@@ -2,6 +2,8 @@
 
 > Every command, every flag, every output format.
 > All commands: `npx tsx src/cli.ts <command> [args] [flags]`
+>
+> All `<path>` arguments accept both `.aether` and `.json` files. The `.aether` format is the recommended primary format.
 
 ## Pipeline Commands
 
@@ -9,7 +11,7 @@
 Run IR validator on a graph.
 
 ```
-npx tsx src/cli.ts validate src/ir/examples/user-registration.json
+npx tsx src/cli.ts validate src/ir/examples/user-registration.aether
 ```
 
 Output: `✓ Valid AETHER graph: user-registration (3 nodes, 3 edges)` or list of errors.
@@ -18,7 +20,7 @@ Output: `✓ Valid AETHER graph: user-registration (3 nodes, 3 edges)` or list o
 Run semantic type checker on all edges.
 
 ```
-npx tsx src/cli.ts check src/ir/examples/user-registration.json
+npx tsx src/cli.ts check src/ir/examples/user-registration.aether
 ```
 
 Output: compatibility report with errors (DIMENSION_MISMATCH, DOMAIN_MISMATCH, SENSITIVITY_VIOLATION, BASE_TYPE_MISMATCH) and warnings (UNIT_MISMATCH, CONSTRAINT_WARNING).
@@ -27,25 +29,34 @@ Output: compatibility report with errors (DIMENSION_MISMATCH, DOMAIN_MISMATCH, S
 Run Z3 contract verifier.
 
 ```
-npx tsx src/cli.ts verify src/ir/examples/user-registration.json
+npx tsx src/cli.ts verify src/ir/examples/user-registration.aether
 ```
 
 Output: per-node verification results (verified/failed/unsupported) with overall percentage.
+
+### `parse <path>`
+Parse a `.aether` file, report syntax errors, and display a summary.
+
+```
+npx tsx src/cli.ts parse src/ir/examples/user-registration.aether
+```
+
+Output: `✓ Valid AETHER program: user_registration (3 nodes, 3 edges)` or detailed parse errors with line/column locations and suggestions.
 
 ### `generate <path>`
 Validate freshly-generated IR with detailed, actionable feedback.
 
 ```
-npx tsx src/cli.ts generate my-graph.json
+npx tsx src/cli.ts generate my-graph.aether
 ```
 
-Runs 5-step gauntlet: JSON parse → schema validation → structural validation → type checking → contract verification. Outputs `STATUS: ACCEPTED` or `STATUS: REJECTED` with specific fix instructions for every error.
+Runs 5-step gauntlet: parse → schema validation → structural validation → type checking → contract verification. Outputs `STATUS: ACCEPTED` or `STATUS: REJECTED` with specific fix instructions for every error.
 
 ### `resolve <path>`
 Resolve intent nodes to certified algorithms.
 
 ```
-npx tsx src/cli.ts resolve src/ir/examples/intent-data-pipeline.json
+npx tsx src/cli.ts resolve src/ir/examples/intent-data-pipeline.aether
 ```
 
 Output: which intents resolved, which algorithm was chosen, and why unresolved intents couldn't be matched.
@@ -54,7 +65,7 @@ Output: which intents resolved, which algorithm was chosen, and why unresolved i
 Run the full pipeline and produce a summary dashboard.
 
 ```
-npx tsx src/cli.ts report src/ir/examples/payment-processing.json
+npx tsx src/cli.ts report src/ir/examples/payment-processing.aether
 ```
 
 Runs: validate → check → verify → resolve → execute (stub) → visualize. Includes optimization suggestion count, proof readiness, and native compilation info.
@@ -65,10 +76,33 @@ Runs: validate → check → verify → resolve → execute (stub) → visualize
 Generate JavaScript from an AETHER graph.
 
 ```
-npx tsx src/cli.ts transpile src/ir/examples/user-registration.json
+npx tsx src/cli.ts transpile src/ir/examples/user-registration.aether
 ```
 
 Output: `{graph_id}.generated.js` with async functions, confidence propagation, and recovery wrappers.
+
+### `format <path> [--output <path>]`
+Convert between `.aether` and `.json` formats. The direction is inferred from the input file extension.
+
+```
+# .aether → .json
+npx tsx src/cli.ts format src/ir/examples/user-registration.aether
+
+# .json → .aether
+npx tsx src/cli.ts format src/ir/examples/user-registration.json
+
+# With explicit output path
+npx tsx src/cli.ts format my-graph.json --output my-graph.aether
+```
+
+### `init <name>`
+Generate a skeleton `.aether` file with a starter node and edge structure.
+
+```
+npx tsx src/cli.ts init my-pipeline.aether
+```
+
+Output: creates `my-pipeline.aether` with a minimal graph template ready to edit.
 
 ### `compact <path> [--output <path.aether>]`
 Convert IR JSON to compact form (~60% fewer tokens).
@@ -100,10 +134,10 @@ npx tsx src/cli.ts instantiate src/stdlib/patterns/crud-entity.template.json \
 Execute a graph via the runtime.
 
 ```
-npx tsx src/cli.ts execute src/ir/examples/user-registration.json
-npx tsx src/cli.ts execute src/ir/examples/user-registration.json --jit
-npx tsx src/cli.ts execute src/ir/examples/user-registration.json --profile
-npx tsx src/cli.ts execute src/ir/examples/user-registration.json --inputs inputs.json
+npx tsx src/cli.ts execute src/ir/examples/user-registration.aether
+npx tsx src/cli.ts execute src/ir/examples/user-registration.aether --jit
+npx tsx src/cli.ts execute src/ir/examples/user-registration.aether --profile
+npx tsx src/cli.ts execute src/ir/examples/user-registration.aether --inputs inputs.json
 ```
 
 | Flag | Effect |
@@ -122,8 +156,8 @@ Output: wave-by-wave execution log with confidence propagation and effect tracki
 Profile, compile hot subgraphs to optimized JavaScript, and benchmark.
 
 ```
-npx tsx src/cli.ts jit src/ir/examples/user-registration.json --runs 20
-npx tsx src/cli.ts jit src/ir/examples/user-registration.json --optimize --runs 20
+npx tsx src/cli.ts jit src/ir/examples/user-registration.aether --runs 20
+npx tsx src/cli.ts jit src/ir/examples/user-registration.aether --optimize --runs 20
 ```
 
 | Flag | Effect |
@@ -138,14 +172,14 @@ Output: hot path recommendations, compilation summary, before/after performance 
 Profile without compilation.
 
 ```
-npx tsx src/cli.ts profile src/ir/examples/user-registration.json --runs 20
+npx tsx src/cli.ts profile src/ir/examples/user-registration.aether --runs 20
 ```
 
 ### `benchmark <path> [flags]`
 Compare interpreted vs compiled vs native performance.
 
 ```
-npx tsx src/cli.ts benchmark src/ir/examples/user-registration.json --runs 50 --native
+npx tsx src/cli.ts benchmark src/ir/examples/user-registration.aether --runs 50 --native
 ```
 
 | Flag | Effect |
@@ -159,8 +193,8 @@ npx tsx src/cli.ts benchmark src/ir/examples/user-registration.json --runs 50 --
 Generate HTML graph visualization.
 
 ```
-npx tsx src/cli.ts visualize src/ir/examples/user-registration.json --open
-npx tsx src/cli.ts visualize src/ir/examples/user-registration.json --execute --open
+npx tsx src/cli.ts visualize src/ir/examples/user-registration.aether --open
+npx tsx src/cli.ts visualize src/ir/examples/user-registration.aether --execute --open
 ```
 
 | Flag | Effect |
@@ -173,7 +207,7 @@ npx tsx src/cli.ts visualize src/ir/examples/user-registration.json --execute --
 Generate comprehensive verification dashboard.
 
 ```
-npx tsx src/cli.ts dashboard src/ir/examples/payment-processing.json --execute --optimize --open
+npx tsx src/cli.ts dashboard src/ir/examples/payment-processing.aether --execute --optimize --open
 ```
 
 | Flag | Effect |
@@ -193,9 +227,9 @@ Compare verification status between two graph versions.
 Analyze graph and suggest optimizations.
 
 ```
-npx tsx src/cli.ts optimize src/ir/examples/payment-processing.json
-npx tsx src/cli.ts optimize src/ir/examples/payment-processing.json --apply
-npx tsx src/cli.ts optimize src/ir/examples/payment-processing.json --profile profile.json
+npx tsx src/cli.ts optimize src/ir/examples/payment-processing.aether
+npx tsx src/cli.ts optimize src/ir/examples/payment-processing.aether --apply
+npx tsx src/cli.ts optimize src/ir/examples/payment-processing.aether --profile profile.json
 ```
 
 | Flag | Effect |
@@ -216,7 +250,7 @@ Output: change list with breaking change warnings and affected nodes.
 Generate Lean 4 proof skeletons. Most non-trivial contracts produce `sorry` placeholders requiring manual completion.
 
 ```
-npx tsx src/cli.ts export-proofs src/ir/examples/user-registration.json
+npx tsx src/cli.ts export-proofs src/ir/examples/user-registration.aether
 ```
 
 ## Scope & Collaboration Commands
@@ -225,21 +259,21 @@ npx tsx src/cli.ts export-proofs src/ir/examples/user-registration.json
 Extract and validate a single scope.
 
 ```
-npx tsx src/cli.ts scope src/ir/examples/multi-scope-order.json order
+npx tsx src/cli.ts scope src/ir/examples/multi-scope-order.aether order
 ```
 
 ### `scope-check <path>`
 Validate all scopes and boundary compatibility.
 
 ```
-npx tsx src/cli.ts scope-check src/ir/examples/multi-scope-order.json
+npx tsx src/cli.ts scope-check src/ir/examples/multi-scope-order.aether
 ```
 
 ### `collaborate <path>`
 Simulate multi-agent collaboration.
 
 ```
-npx tsx src/cli.ts collaborate src/ir/examples/multi-agent-marketplace.json
+npx tsx src/cli.ts collaborate src/ir/examples/multi-agent-marketplace.aether
 ```
 
 ### `incremental`
@@ -257,9 +291,9 @@ Subcommands within REPL: `add-node`, `add-hole`, `fill-hole`, `add-edge`, `remov
 Compile AETHER graph to native binary via LLVM.
 
 ```
-npx tsx src/cli.ts compile src/ir/examples/user-registration.json --verbose
-npx tsx src/cli.ts compile src/ir/examples/user-registration.json --target llvm-ir
-npx tsx src/cli.ts compile src/ir/examples/user-registration.json --stubs --harness
+npx tsx src/cli.ts compile src/ir/examples/user-registration.aether --verbose
+npx tsx src/cli.ts compile src/ir/examples/user-registration.aether --target llvm-ir
+npx tsx src/cli.ts compile src/ir/examples/user-registration.aether --stubs --harness
 ```
 
 | Flag | Effect |
@@ -318,7 +352,7 @@ Search packages by keyword.
 Open interactive visual graph editor in browser.
 
 ```
-npx tsx src/cli.ts editor src/ir/examples/user-registration.json --open
+npx tsx src/cli.ts editor src/ir/examples/user-registration.aether --open
 npx tsx src/cli.ts editor --open  # empty editor
 ```
 
@@ -341,6 +375,22 @@ npx tsx src/cli.ts demo --output my-demo.html
 | `--open` | Open in default browser |
 
 Includes 4 pre-built examples (user registration, payment processing, content moderation, ETL pipeline) and LLM generation with auto-fix loop (up to 3 attempts).
+
+## AI Generation Commands
+
+### `ai <description> [flags]`
+Generate an AETHER program from a natural language description using an LLM.
+
+```
+npx tsx src/cli.ts ai "Build a user signup flow with email validation" --format aether
+npx tsx src/cli.ts ai "Payment processing pipeline with retry" --format json
+```
+
+| Flag | Effect |
+|---|---|
+| `--format <fmt>` | Output format: `aether` (default) or `json` |
+
+Output: generates a complete, validated program and writes it to disk. Default format is `.aether`.
 
 ## General
 

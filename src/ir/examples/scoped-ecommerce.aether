@@ -1,0 +1,134 @@
+// E-commerce checkout pipeline with 3 scopes: catalog, checkout, post-purchase
+//
+
+graph scoped_ecommerce v1
+  effects: [database.read, database.write, cache.read, cache.write, payment_gateway.write, email, analytics.write]
+
+  metadata:
+    description: "E-commerce checkout pipeline with 3 scopes: catalog, checkout, post-purchase"
+
+  scope catalog
+    nodes: [load_cart, validate_stock, apply_discounts]
+    provides:
+      catalog_output: () -> (in_stock_items: List<CartItem>, final_total: Float64 @USD)
+  end
+
+  scope checkout
+    nodes: [reserve_inventory, charge_payment, create_order_record]
+    requires:
+      catalog_output: (in_stock_items: List<CartItem>, final_total: Float64 @USD) -> ()
+    provides:
+      checkout_output: () -> (order_id: String, transaction_id: String @payment, final_total: Float64 @USD)
+  end
+
+  scope post_purchase
+    nodes: [send_receipt, track_analytics]
+    requires:
+      catalog_output: (final_total: Float64 @USD) -> ()
+      checkout_output: (order_id: String, transaction_id: String @payment) -> ()
+  end
+
+  // ─── Nodes ───
+
+  node load_cart
+    in:  session_id: String
+    out: cart_items: List<CartItem>, cart_total: Float64 @USD
+    effects: [database.read, cache.read]
+    contracts:
+      post: cart_total >= 0
+    recovery:
+      cache_miss -> retry
+  end
+
+  node validate_stock
+    in:  cart_items: List<CartItem>
+    out: in_stock_items: List<CartItem>, all_available: Bool
+    effects: [database.read]
+    contracts:
+      post: all_available == true
+    recovery:
+      partial_stock -> respond(409, "some items out of stock")
+  end
+
+  node apply_discounts
+    in:  in_stock_items: List<CartItem>, cart_total: Float64 @USD
+    out: final_total: Float64 @USD, discount_applied: String
+    contracts:
+      pre:  cart_total >= 0
+      post: final_total >= 0
+      post: final_total <= cart_total
+    pure
+  end
+
+  node reserve_inventory
+    in:  in_stock_items: List<CartItem>
+    out: reservation_id: String, reserved_items: List<CartItem>
+    effects: [database.write]
+    contracts:
+      post: reservation_id.length > 0
+    recovery:
+      reservation_failed -> retry(exponential)
+  end
+
+  node charge_payment
+    in:  final_total: Float64 @USD, reservation_id: String
+    out: transaction_id: String @payment, charge_status: String @payment
+    effects: [payment_gateway.write]
+    contracts:
+      pre:  final_total > 0
+      pre:  reservation_id.length > 0
+      post: charge_status == success
+      post: transaction_id.length > 0
+    recovery:
+      payment_declined -> respond(402, "payment failed")
+      gateway_timeout -> retry(exponential)
+  end
+
+  node create_order_record
+    in:  transaction_id: String @payment, reserved_items: List<CartItem>, final_total: Float64 @USD
+    out: order_id: String, order_status: String
+    effects: [database.write]
+    contracts:
+      pre:  transaction_id.length > 0
+      post: order_id.length > 0
+    recovery:
+      db_error -> retry
+  end
+
+  node send_receipt
+    in:  order_id: String, transaction_id: String @payment
+    out: receipt_sent: Bool
+    effects: [email]
+    contracts:
+      post: receipt_sent == true
+    recovery:
+      email_failed -> report(channel: email-failures)
+  end
+
+  node track_analytics
+    in:  order_id: String, final_total: Float64 @USD
+    out: event_logged: Bool
+    effects: [analytics.write]
+    contracts:
+      post: event_logged == true
+    recovery:
+      analytics_down -> report(channel: analytics-failures)
+  end
+
+  // ─── Edges ───
+
+  edge load_cart.cart_items -> validate_stock.cart_items
+  edge load_cart.cart_total -> apply_discounts.cart_total
+  edge validate_stock.in_stock_items -> apply_discounts.in_stock_items
+  edge validate_stock.in_stock_items -> reserve_inventory.in_stock_items
+  edge apply_discounts.final_total -> charge_payment.final_total
+  edge reserve_inventory.reservation_id -> charge_payment.reservation_id
+  edge charge_payment.transaction_id -> create_order_record.transaction_id
+  edge reserve_inventory.reserved_items -> create_order_record.reserved_items
+  edge apply_discounts.final_total -> create_order_record.final_total
+  edge create_order_record.order_id -> send_receipt.order_id
+  edge charge_payment.transaction_id -> send_receipt.transaction_id
+  edge create_order_record.order_id -> track_analytics.order_id
+  edge apply_discounts.final_total -> track_analytics.final_total
+
+end // graph

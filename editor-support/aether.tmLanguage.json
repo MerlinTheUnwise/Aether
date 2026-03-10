@@ -1,0 +1,19 @@
+{
+  "name": "AETHER",
+  "scopeName": "source.aether",
+  "fileTypes": ["aether"],
+  "patterns": [
+    { "name": "comment.line.double-slash.aether", "match": "//.*$" },
+    { "name": "keyword.control.aether", "match": "\\b(graph|node|edge|end|hole|intent|scope|template|use|statetype|supervised)\\b" },
+    { "name": "keyword.other.aether", "match": "\\b(in|out|effects|contracts|recovery|confidence|pure|ensure|constraints|params|pre|post|never|terminal|initial|when|requires|provides|must_satisfy|nodes|partial)\\b" },
+    { "name": "entity.name.type.aether", "match": "\\b(String|Bool|Int|Float64|Decimal|List|Record|Map|User|Email|UUID)\\b" },
+    { "name": "variable.annotation.aether", "match": "@\\w+" },
+    { "name": "string.quoted.double.aether", "begin": "\"", "end": "\"", "patterns": [
+      { "name": "constant.character.escape.aether", "match": "\\\\." }
+    ]},
+    { "name": "constant.numeric.aether", "match": "\\b\\d+(\\.\\d+)?\\b" },
+    { "name": "keyword.operator.arrow.aether", "match": "->" },
+    { "name": "constant.language.boolean.aether", "match": "\\b(true|false)\\b" },
+    { "name": "variable.parameter.aether", "match": "\\$\\w+" }
+  ]
+}

@@ -1,0 +1,245 @@
+{
+  "id": "transaction_analysis_pipeline",
+  "version": 1,
+  "effects": ["filesystem.read", "filesystem.write", "ml_model.infer"],
+  "metadata": {
+    "description": "Real local I/O pipeline: reads CSV/JSON from disk, validates, cleans, deduplicates, detects anomalies, computes analytics, writes CSV/HTML/JSON output files",
+    "safety_level": "standard"
+  },
+  "nodes": [
+    {
+      "id": "read_transactions",
+      "in": {
+        "file_path": { "type": "String", "domain": "filesystem" }
+      },
+      "out": {
+        "data": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "contract": {
+        "post": ["data.length > 0"]
+      },
+      "effects": ["filesystem.read"],
+      "recovery": {
+        "file_not_found": {
+          "action": "escalate",
+          "params": { "message": "transactions.csv not found" }
+        }
+      }
+    },
+    {
+      "id": "read_customers",
+      "in": {
+        "file_path": { "type": "String", "domain": "filesystem" }
+      },
+      "out": {
+        "customers": { "type": "List<Record>", "domain": "customers" }
+      },
+      "contract": {
+        "post": ["customers.length > 0"]
+      },
+      "effects": ["filesystem.read"],
+      "recovery": {
+        "file_not_found": {
+          "action": "escalate",
+          "params": { "message": "customers.json not found" }
+        }
+      }
+    },
+    {
+      "id": "read_categories",
+      "in": {
+        "file_path": { "type": "String", "domain": "filesystem" }
+      },
+      "out": {
+        "categories": { "type": "List<Record>", "domain": "categories" }
+      },
+      "contract": {
+        "post": ["categories.length > 0"]
+      },
+      "effects": ["filesystem.read"],
+      "recovery": {
+        "file_not_found": {
+          "action": "escalate",
+          "params": { "message": "categories.json not found" }
+        }
+      }
+    },
+    {
+      "id": "validate_txn_records",
+      "in": {
+        "data": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "out": {
+        "valid": { "type": "List<Record>", "domain": "transactions" },
+        "invalid": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "contract": {
+        "post": ["valid.length + invalid.length == data.length"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "join_customer_data",
+      "in": {
+        "data": { "type": "List<Record>", "domain": "transactions" },
+        "customers": { "type": "List<Record>", "domain": "customers" }
+      },
+      "out": {
+        "enriched": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "contract": {
+        "post": ["enriched.length == data.length"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "clean_and_dedupe",
+      "in": {
+        "valid": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "out": {
+        "cleaned": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "contract": {
+        "post": ["cleaned.length <= valid.length"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "detect_txn_anomalies",
+      "in": {
+        "cleaned": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "out": {
+        "normal": { "type": "List<Record>", "domain": "transactions" },
+        "anomalies": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "contract": {
+        "post": ["normal.length + anomalies.length == cleaned.length"]
+      },
+      "confidence": 0.82,
+      "adversarial_check": {
+        "break_if": ["anomalies.length > cleaned.length * 0.5"]
+      },
+      "effects": ["ml_model.infer"],
+      "recovery": {
+        "model_error": {
+          "action": "fallback",
+          "params": { "value": { "normal": [], "anomalies": [] } }
+        }
+      }
+    },
+    {
+      "id": "calculate_analytics",
+      "in": {
+        "data": { "type": "List<Record>", "domain": "transactions" },
+        "customers": { "type": "List<Record>", "domain": "customers" },
+        "categories": { "type": "List<Record>", "domain": "categories" },
+        "anomalies": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "out": {
+        "analytics": { "type": "Record", "domain": "analytics" }
+      },
+      "contract": {
+        "post": ["analytics.revenue_by_region.length > 0"]
+      },
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "generate_txn_report",
+      "in": {
+        "analytics": { "type": "Record", "domain": "analytics" },
+        "anomalies": { "type": "List<Record>", "domain": "transactions" },
+        "cleaned": { "type": "List<Record>", "domain": "transactions" },
+        "invalid": { "type": "List<Record>", "domain": "transactions" }
+      },
+      "out": {
+        "report": { "type": "Record", "domain": "report" }
+      },
+      "contract": {},
+      "pure": true,
+      "effects": []
+    },
+    {
+      "id": "write_csv_output",
+      "in": {
+        "cleaned": { "type": "List<Record>", "domain": "transactions" },
+        "output_dir": { "type": "String", "domain": "filesystem" }
+      },
+      "out": {
+        "csv_path": { "type": "String", "domain": "filesystem" }
+      },
+      "contract": {},
+      "effects": ["filesystem.write"],
+      "recovery": {
+        "disk_error": {
+          "action": "escalate",
+          "params": { "message": "failed to write CSV output" }
+        }
+      }
+    },
+    {
+      "id": "write_report",
+      "in": {
+        "report": { "type": "Record", "domain": "report" },
+        "output_dir": { "type": "String", "domain": "filesystem" }
+      },
+      "out": {
+        "report_path": { "type": "String", "domain": "filesystem" }
+      },
+      "contract": {},
+      "effects": ["filesystem.write"],
+      "recovery": {
+        "disk_error": {
+          "action": "escalate",
+          "params": { "message": "failed to write HTML report" }
+        }
+      }
+    },
+    {
+      "id": "write_summary",
+      "in": {
+        "report": { "type": "Record", "domain": "report" },
+        "output_dir": { "type": "String", "domain": "filesystem" }
+      },
+      "out": {
+        "summary_path": { "type": "String", "domain": "filesystem" }
+      },
+      "contract": {},
+      "effects": ["filesystem.write"],
+      "recovery": {
+        "disk_error": {
+          "action": "escalate",
+          "params": { "message": "failed to write JSON summary" }
+        }
+      }
+    }
+  ],
+  "edges": [
+    { "from": "read_transactions.data", "to": "validate_txn_records.data" },
+    { "from": "read_transactions.data", "to": "join_customer_data.data" },
+    { "from": "read_customers.customers", "to": "join_customer_data.customers" },
+
+    { "from": "validate_txn_records.valid", "to": "clean_and_dedupe.valid" },
+
+    { "from": "clean_and_dedupe.cleaned", "to": "detect_txn_anomalies.cleaned" },
+
+    { "from": "detect_txn_anomalies.normal", "to": "calculate_analytics.data" },
+    { "from": "read_customers.customers", "to": "calculate_analytics.customers" },
+    { "from": "read_categories.categories", "to": "calculate_analytics.categories" },
+    { "from": "detect_txn_anomalies.anomalies", "to": "calculate_analytics.anomalies" },
+
+    { "from": "calculate_analytics.analytics", "to": "generate_txn_report.analytics" },
+    { "from": "detect_txn_anomalies.anomalies", "to": "generate_txn_report.anomalies" },
+    { "from": "clean_and_dedupe.cleaned", "to": "generate_txn_report.cleaned" },
+    { "from": "validate_txn_records.invalid", "to": "generate_txn_report.invalid" },
+
+    { "from": "clean_and_dedupe.cleaned", "to": "write_csv_output.cleaned" },
+    { "from": "generate_txn_report.report", "to": "write_report.report" },
+    { "from": "generate_txn_report.report", "to": "write_summary.report" }
+  ]
+}

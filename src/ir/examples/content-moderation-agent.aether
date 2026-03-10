@@ -1,0 +1,97 @@
+// AI content moderation agent with confidence cascading, adversarial self-checks, and human-in-the-loop
+//
+
+graph content_moderation_agent v1
+  effects: [ml_model.infer, database.read, database.write]
+
+  metadata:
+    description: "AI content moderation agent with confidence cascading, adversarial self-checks, and human-in-the-loop"
+    safety_level: high
+    human_oversight: "confidence < 0.9"
+
+  // ─── Nodes ───
+
+  node classify_content
+    in:  content: String @mod, content_type: String @mod
+    out: category: String @mod, classification_confidence: Float64 @range(0, 1)
+    effects: [ml_model.infer]
+    contracts:
+      post: classification_confidence >= 0
+      post: classification_confidence <= 1
+    recovery:
+      model_error -> escalate("classification model failed")
+      timeout -> retry(exponential)
+    adversarial:
+      break_if: classification_confidence < 0
+      break_if: classification_confidence > 1
+    confidence: 0.8
+  end
+
+  node assess_severity
+    in:  category: String @mod, classification_confidence: Float64 @range(0, 1), content: String @mod
+    out: severity: String @mod, combined_confidence: Float64 @range(0, 1)
+    effects: [ml_model.infer]
+    contracts:
+      post: combined_confidence >= 0
+      post: combined_confidence <= 1
+    recovery:
+      assessment_failed -> escalate("severity assessment failed")
+    adversarial:
+      break_if: combined_confidence > classification_confidence
+      break_if: combined_confidence < 0
+    confidence: 0.75
+  end
+
+  node decide_action
+    in:  severity: String @mod, combined_confidence: Float64 @range(0, 1), category: String @mod
+    out: moderation_action: String @mod, requires_human_review: Bool, decision_confidence: Float64 @range(0, 1)
+    effects: [database.read]
+    contracts:
+      post: decision_confidence >= 0
+      post: decision_confidence <= 1
+      inv:  never(moderation_action == auto_remove ∧ combined_confidence < 0.9)
+      inv:  never(moderation_action == ban_user ∧ requires_human_review == false)
+    recovery:
+      decision_failed -> escalate("moderation decision could not be made")
+    adversarial:
+      break_if: decision_confidence > combined_confidence
+      break_if: decision_confidence < 0
+    confidence: 0.7
+  end
+
+  node execute_moderation
+    in:  moderation_action: String @mod, requires_human_review: Bool, decision_confidence: Float64 @constraint("> 0.9") @range(0, 1)
+    out: action_taken: String @mod, success: Bool
+    effects: [database.write]
+    contracts:
+      pre:  decision_confidence > 0
+      post: success == true
+    recovery:
+      execution_failed -> escalate("moderation action execution failed")
+  end
+
+  node log_decision
+    in:  action_taken: String @mod, decision_confidence: Float64 @range(0, 1), category: String @mod
+    out: logged: Bool
+    effects: [database.write]
+    contracts:
+      post: logged == true
+    recovery:
+      log_failed -> report(channel: moderation-audit)
+  end
+
+  // ─── Edges ───
+
+  edge classify_content.category -> assess_severity.category
+  edge classify_content.classification_confidence -> assess_severity.classification_confidence
+  edge assess_severity.severity -> decide_action.severity
+  edge assess_severity.combined_confidence -> decide_action.combined_confidence
+  edge classify_content.category -> decide_action.category
+  edge decide_action.moderation_action -> execute_moderation.moderation_action
+  edge decide_action.requires_human_review -> execute_moderation.requires_human_review
+  edge decide_action.decision_confidence -> execute_moderation.decision_confidence
+  edge execute_moderation.action_taken -> log_decision.action_taken
+  edge decide_action.decision_confidence -> log_decision.decision_confidence
+  edge classify_content.category -> log_decision.category
+
+end // graph

@@ -31,8 +31,8 @@ describe("Editor Generate", () => {
     const html = generateEditor();
     expect(html).toContain("exportGraph");
     expect(html).toContain("importGraph");
-    expect(html).toContain("Import");
-    expect(html).toContain("Export");
+    expect(html).toContain("Open");
+    expect(html).toContain("Save");
   });
 
   it("empty editor contains validation error panel", () => {

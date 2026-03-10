@@ -1,0 +1,121 @@
+// Real-world sales analytics pipeline: CSV ingestion, validation, cleaning, anomaly detection, parallel analytics, report generation, archival, and email delivery
+//
+
+graph sales_analytics_pipeline v1
+  effects: [filesystem.read, filesystem.write, ml_model.infer, email]
+
+  metadata:
+    description: "Real-world sales analytics pipeline: CSV ingestion, validation, cleaning, anomaly detection, parallel analytics, report generation, archival, and email delivery"
+    safety_level: standard
+
+  // ─── Nodes ───
+
+  node fetch_csv_data
+    in:  file_path: String
+    out: raw_data: List<Record>
+    effects: [filesystem.read]
+    contracts:
+      post: raw_data.length > 0
+    recovery:
+      file_not_found -> escalate("CSV file not found")
+  end
+
+  node validate_records
+    in:  raw_data: List<Record>
+    out: valid: List<Record>, invalid: List<Record>
+    contracts:
+      post: valid.length + invalid.length == raw_data.length
+    pure
+  end
+
+  node clean_and_normalize
+    in:  valid: List<Record>
+    out: cleaned: List<Record>
+    contracts:
+      post: cleaned.length <= valid.length
+    pure
+  end
+
+  node detect_anomalies
+    in:  cleaned: List<Record>
+    out: data: List<Record>, anomalies: List<Record>
+    effects: [ml_model.infer]
+    contracts:
+      post: data.length + anomalies.length == cleaned.length
+    recovery:
+      model_error -> fallback(value: "{\"data\":[],\"anomalies\":[]}")
+    adversarial:
+      break_if: anomalies.length > cleaned.length * 0.5
+    confidence: 0.82
+  end
+
+  node calculate_revenue_by_region
+    in:  data: List<Record>
+    out: revenue_by_region: List<Record>
+    contracts:
+      post: revenue_by_region.length > 0
+    pure
+  end
+
+  node calculate_top_products
+    in:  data: List<Record>
+    out: top_products: List<Record>
+    contracts:
+      post: top_products.length <= 10
+    pure
+  end
+
+  node calculate_growth_trends
+    in:  data: List<Record>
+    out: trends: List<Record>
+    contracts:
+      post: trends.length > 0
+    pure
+  end
+
+  node generate_report
+    in:  revenue_by_region: List<Record>, top_products: List<Record>, trends: List<Record>, anomalies: List<Record>
+    out: report: Record
+    contracts:
+      post: report.sections_count == 4
+    pure
+  end
+
+  node archive_report
+    in:  report: Record
+    out: archived: Bool, path: String
+    effects: [filesystem.write]
+    contracts:
+      post: archived == true
+    recovery:
+      disk_full -> escalate("disk full — cannot archive report")
+  end
+
+  node email_report
+    in:  report: Record, archived: Bool
+    out: sent: Bool
+    effects: [email]
+    contracts:
+      pre:  archived == true
+      post: sent == true
+    recovery:
+      email_failure -> retry(exponential)
+  end
+
+  // ─── Edges ───
+
+  edge fetch_csv_data.raw_data -> validate_records.raw_data
+  edge validate_records.valid -> clean_and_normalize.valid
+  edge clean_and_normalize.cleaned -> detect_anomalies.cleaned
+  edge detect_anomalies.data -> calculate_revenue_by_region.data
+  edge detect_anomalies.data -> calculate_top_products.data
+  edge detect_anomalies.data -> calculate_growth_trends.data
+  edge detect_anomalies.anomalies -> generate_report.anomalies
+  edge calculate_revenue_by_region.revenue_by_region -> generate_report.revenue_by_region
+  edge calculate_top_products.top_products -> generate_report.top_products
+  edge calculate_growth_trends.trends -> generate_report.trends
+  edge generate_report.report -> archive_report.report
+  edge generate_report.report -> email_report.report
+  edge archive_report.archived -> email_report.archived
+
+end // graph

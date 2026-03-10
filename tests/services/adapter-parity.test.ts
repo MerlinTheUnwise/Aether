@@ -7,13 +7,13 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { AetherDatabase } from "../../src/implementations/services/database.js";
-import { SQLiteDatabaseAdapter } from "../../src/implementations/services/database-sqlite.js";
+import { SQLiteDatabaseAdapter, isSQLiteAvailable } from "../../src/implementations/services/database-sqlite.js";
 import { AetherFileSystem } from "../../src/implementations/services/filesystem.js";
 import { RealFilesystemAdapter } from "../../src/implementations/services/filesystem-real.js";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
-describe("Adapter Parity — Database", () => {
+describe.skipIf(!isSQLiteAvailable)("Adapter Parity — Database", () => {
   const sqliteDbs: SQLiteDatabaseAdapter[] = [];
 
   afterEach(() => {

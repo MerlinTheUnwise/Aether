@@ -37,6 +37,8 @@ import { fetchDataImpl, formatReportImpl, deliverImpl } from "./intent-data-pipe
 import { fetchCsvDataImpl, validateRecordsImpl, cleanAndNormalizeImpl, detectAnomaliesImpl, calculateRevenueByRegionImpl, calculateTopProductsImpl, calculateGrowthTrendsImpl, generateReportImpl, archiveReportImpl, emailReportImpl } from "./sales-analytics.js";
 // API Orchestration
 import { authenticateUserImpl, checkInventoryApiImpl, processOrderPaymentImpl, createOrderRecordApiImpl, createShipmentApiImpl, sendOrderConfirmationImpl, respondSuccessImpl } from "./api-orchestration.js";
+// Transaction Analysis Pipeline
+import { readTransactionsImpl, readCustomersImpl, readCategoriesImpl, validateTxnRecordsImpl, joinCustomerDataImpl, cleanAndDedupeImpl as cleanAndDedupeTxnImpl, detectTxnAnomaliesImpl, calculateAnalyticsImpl, generateTxnReportImpl, writeCsvOutputImpl, writeReportImpl, writeSummaryImpl } from "./transaction-analysis.js";
 
 // ─── Helper to create RegisteredImplementation ──────────────────────────────────
 
@@ -176,6 +178,20 @@ export function getProgramImplementations(): RegisteredImplementation[] {
     reg("create_shipment_api", createShipmentApiImpl, { effects: ["shipping.write", "database.write"] }),
     reg("send_order_confirmation", sendOrderConfirmationImpl, { effects: ["email"] }),
     reg("respond_success", respondSuccessImpl, { pure: true }),
+
+    // Transaction Analysis Pipeline
+    reg("read_transactions", readTransactionsImpl, { effects: ["filesystem.read"] }),
+    reg("read_customers", readCustomersImpl, { effects: ["filesystem.read"] }),
+    reg("read_categories", readCategoriesImpl, { effects: ["filesystem.read"] }),
+    reg("validate_txn_records", validateTxnRecordsImpl, { pure: true }),
+    reg("join_customer_data", joinCustomerDataImpl, { pure: true }),
+    reg("clean_and_dedupe", cleanAndDedupeTxnImpl, { pure: true }),
+    reg("detect_txn_anomalies", detectTxnAnomaliesImpl, { effects: ["ml_model.infer"] }),
+    reg("calculate_analytics", calculateAnalyticsImpl, { pure: true }),
+    reg("generate_txn_report", generateTxnReportImpl, { pure: true }),
+    reg("write_csv_output", writeCsvOutputImpl, { effects: ["filesystem.write"] }),
+    reg("write_report", writeReportImpl, { effects: ["filesystem.write"] }),
+    reg("write_summary", writeSummaryImpl, { effects: ["filesystem.write"] }),
   ];
 }
 

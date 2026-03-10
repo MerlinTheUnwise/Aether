@@ -1,0 +1,54 @@
+graph rate_limiter v1
+  effects: [database.read, database.write]
+
+  // ─── Nodes ───
+
+  node check_quota
+    in:  client_id: String, window_seconds: Int @seconds, max_requests: Int @range(1, 10000)
+    out: current_count: Int, within_limit: Bool, remaining: Int
+    contracts:
+      post: current_count >= 0
+      post: remaining >= 0
+    pure
+  end
+
+  node increment_counter
+    in:  client_id: String, within_limit: Bool @constraint("== true")
+    out: new_count: Int, success: Bool
+    effects: [database.write]
+    contracts:
+      pre:  within_limit == true
+      post: new_count > 0
+      post: success == true
+    recovery:
+      db_error -> retry(linear)
+  end
+
+  node enforce_limit
+    in:  within_limit: Bool, remaining: Int, client_id: String
+    out: allowed: Bool, retry_after_seconds: Int @seconds
+    effects: [database.read]
+    contracts:
+      post: retry_after_seconds >= 0
+    recovery:
+      rate_exceeded -> respond(429, "rate limited")
+  end
+
+  node reset_window
+    in:  client_id: String, window_seconds: Int @seconds
+    out: reset_at: Int @seconds, cleared: Bool
+    effects: [database.write]
+    contracts:
+      post: reset_at > 0
+      post: cleared == true
+    recovery:
+      reset_failed -> retry(linear)
+  end
+
+  // ─── Edges ───
+
+  edge check_quota.within_limit -> increment_counter.within_limit
+  edge check_quota.within_limit -> enforce_limit.within_limit
+  edge check_quota.remaining -> enforce_limit.remaining
+
+end // graph

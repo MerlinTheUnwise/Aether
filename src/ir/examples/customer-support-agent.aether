@@ -1,0 +1,50 @@
+// AI customer support agent with authority limits and human oversight
+//
+
+graph customer_support_agent v1
+  effects: [database, email, ticketing]
+
+  metadata:
+    description: "AI customer support agent with authority limits and human oversight"
+    safety_level: high
+    human_oversight: "confidence < 0.7"
+
+  // ─── Nodes ───
+
+  node decide_action
+    in:  intent: SupportIntent, urgency: Urgency
+    out: action: SupportAction, confidence_score: Float64 @range(0, 1)
+    effects: [database]
+    contracts:
+      post: action in allowed_actions(intent)
+      post: action.risk_level <= agent_authority_level
+      inv:  never(action modifies billing without human_approval)
+      inv:  never(action deletes user_data)
+    recovery:
+      unknown_intent -> escalate("escalate_to_human")
+      low_confidence -> escalate
+    adversarial:
+      break_if: action.risk_level > agent_authority_level
+      break_if: action modifies billing
+      break_if: action deletes user_data
+    confidence: 0.75
+  end
+
+  node execute_with_guard
+    in:  action: SupportAction, confidence_score: Float64 @constraint("> 0.7") @range(0, 1)
+    out: result: ActionResult
+    effects: [database, email, ticketing]
+    contracts:
+      pre:  confidence_score > 0.7
+      post: result.status in [success, partial, requires_followup]
+    recovery:
+      execution_failed -> escalate("action execution failed")
+      permission_denied -> escalate("agent exceeded authority")
+  end
+
+  // ─── Edges ───
+
+  edge decide_action.action -> execute_with_guard.action
+  edge decide_action.confidence_score -> execute_with_guard.confidence_score
+
+end // graph

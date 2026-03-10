@@ -4,3 +4,19 @@ dist/
 *.js.map
 .DS_Store
 .claude/
+
+# Generated output
+output/
+test-output/
+sample-data/
+
+# Generated HTML reports
+daily-report.html
+rate_limiter.html
+template-showcase.html
+user_registration.html
+
+# Compiled artifacts
+src/compiler/llvm/runtime/*.obj
+src/compiler/llvm/runtime/*.a
+src/compiler/llvm/runtime/*.exe

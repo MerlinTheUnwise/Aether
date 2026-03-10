@@ -1,0 +1,135 @@
+// Demonstrates template usage: CRUD entities and auth gate with template instantiation
+//
+
+graph template-showcase v1
+  effects: [database.write, database.read, auth.verify]
+
+  metadata:
+    description: "Demonstrates template usage: CRUD entities and auth gate with template instantiation"
+
+  template crud-entity
+    params:
+      $Entity: type
+      $IdType: type
+      $storage_effect: effect
+
+    node validate_input
+      in:  data: $Entity
+      out: validated: $Entity
+      contracts:
+        pre:  input.data != null
+        post: output.validated != null
+      pure
+    end
+
+    node create_entity
+      in:  data: $Entity
+      out: entity: $Entity, success: Bool
+      effects: [$storage_effect]
+      contracts:
+        pre:  input.data != null
+        post: output.success == true
+      recovery:
+        storage_failure -> retry
+    end
+
+    node read_entity
+      in:  entity_id: $IdType
+      out: entity: $Entity
+      effects: [$storage_effect]
+      contracts:
+        pre:  input.entity_id != null
+        post: output.entity != null
+      recovery:
+        not_found -> respond(404)
+    end
+
+    edge validate_input.validated -> create_entity.data
+  end
+
+  template auth-gate
+    params:
+      $TokenType: type
+      $UserType: type
+      $auth_effect: effect
+
+    node validate_token
+      in:  token: $TokenType
+      out: claims: TokenClaims, valid: Bool
+      effects: [$auth_effect]
+      contracts:
+        pre:  input.token != null
+        post: output.valid == true
+      recovery:
+        invalid_token -> respond(401)
+    end
+
+    node load_user
+      in:  claims: TokenClaims
+      out: user: $UserType
+      effects: [$auth_effect]
+      contracts:
+        pre:  input.claims != null
+        post: output.user != null
+      recovery:
+        user_not_found -> respond(401)
+    end
+
+    node check_permissions
+      in:  user: $UserType
+      out: authorized_user: $UserType
+      effects: [$auth_effect]
+      contracts:
+        pre:  input.user != null
+        post: output.authorized_user != null
+      recovery:
+        forbidden -> respond(403)
+    end
+
+    edge validate_token.claims -> load_user.claims
+    edge load_user.user -> check_permissions.user
+  end
+
+  use crud-entity as user_crud
+    Entity = [object Object]
+    IdType = [object Object]
+    storage_effect = database.write
+  end
+
+  use crud-entity as product_crud
+    Entity = [object Object]
+    IdType = [object Object]
+    storage_effect = database.write
+  end
+
+  use auth-gate as main_auth
+    TokenType = [object Object]
+    UserType = [object Object]
+    auth_effect = auth.verify
+  end
+
+  // ─── Nodes ───
+
+  node api_router
+    in:  request: HTTPRequest
+    out: token: JWT, entity_data: String, route: String
+    contracts:
+      pre:  input.request != null
+      post: output.route != null
+    pure
+  end
+
+  node response_builder
+    in:  data: String, status: Int
+    out: response: HTTPResponse
+    contracts:
+      pre:  input.status > 0
+      post: output.response != null
+    pure
+  end
+
+  // ─── Edges ───
+
+  edge api_router.route -> response_builder.data
+
+end // graph

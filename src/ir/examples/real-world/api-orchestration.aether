@@ -1,0 +1,106 @@
+// E-commerce order API: JWT authentication, inventory check with reservation, payment processing with confidence-based human review, shipment creation, and email confirmation
+//
+
+graph api_orchestration v1
+  effects: [auth.verify, database.read, database.write, payment_gateway.write, shipping.write, email]
+
+  metadata:
+    description: "E-commerce order API: JWT authentication, inventory check with reservation, payment processing with confidence-based human review, shipment creation, and email confirmation"
+    safety_level: standard
+
+  // ─── Nodes ───
+
+  node authenticate_user
+    in:  token: String
+    out: user_id: String, role: String, authenticated: Bool
+    effects: [auth.verify]
+    contracts:
+      post: authenticated == true
+    recovery:
+      invalid_token -> respond(401, "invalid or expired token")
+  end
+
+  node check_inventory_api
+    in:  product_id: String, quantity: Int @range(1, 1000), user_id: String
+    out: available: Bool, reserved: Bool, unit_price: Float @payment @USD, total_price: Float @payment @USD
+    effects: [database.read, database.write]
+    contracts:
+      post: available == true
+      post: reserved == true
+      post: total_price > 0
+    recovery:
+      out_of_stock -> respond(409, "out of stock")
+  end
+
+  node process_order_payment
+    in:  user_id: String, total_price: Float @payment @USD, product_id: String
+    out: payment_id: String @payment, charged: Bool, amount: Float @payment @USD
+    effects: [payment_gateway.write]
+    contracts:
+      post: charged == true
+      post: amount > 0
+    recovery:
+      payment_declined -> respond(402, "payment declined")
+      gateway_timeout -> retry(exponential)
+    adversarial:
+      break_if: amount > total_price * 1.1
+    confidence: 0.8
+  end
+
+  node create_order_record_api
+    in:  user_id: String, product_id: String, quantity: Int, payment_id: String @payment, total_price: Float @payment @USD
+    out: order_id: String, status: String
+    effects: [database.write]
+    contracts:
+      post: status == "confirmed"
+    recovery:
+      write_failure -> escalate("failed to create order record")
+  end
+
+  node create_shipment_api
+    in:  order_id: String, user_id: String, product_id: String, quantity: Int
+    out: shipment_id: String, tracking_number: String, estimated_delivery: String
+    effects: [shipping.write, database.write]
+    contracts:
+      post: shipment_id.length > 0
+    recovery:
+      shipping_unavailable -> escalate("shipping service unavailable")
+  end
+
+  node send_order_confirmation
+    in:  user_id: String, order_id: String, tracking_number: String, total_price: Float @payment @USD
+    out: email_sent: Bool
+    effects: [email]
+    contracts:
+      post: email_sent == true
+    recovery:
+      email_failure -> retry(exponential)
+  end
+
+  node respond_success
+    in:  order_id: String, shipment_id: String, email_sent: Bool
+    out: status_code: Int, response: Record
+    contracts:
+      post: status_code == 200
+    pure
+  end
+
+  // ─── Edges ───
+
+  edge authenticate_user.user_id -> check_inventory_api.user_id
+  edge check_inventory_api.total_price -> process_order_payment.total_price
+  edge authenticate_user.user_id -> process_order_payment.user_id
+  edge process_order_payment.payment_id -> create_order_record_api.payment_id
+  edge authenticate_user.user_id -> create_order_record_api.user_id
+  edge check_inventory_api.total_price -> create_order_record_api.total_price
+  edge create_order_record_api.order_id -> create_shipment_api.order_id
+  edge authenticate_user.user_id -> create_shipment_api.user_id
+  edge create_order_record_api.order_id -> send_order_confirmation.order_id
+  edge authenticate_user.user_id -> send_order_confirmation.user_id
+  edge create_shipment_api.tracking_number -> send_order_confirmation.tracking_number
+  edge check_inventory_api.total_price -> send_order_confirmation.total_price
+  edge create_order_record_api.order_id -> respond_success.order_id
+  edge create_shipment_api.shipment_id -> respond_success.shipment_id
+  edge send_order_confirmation.email_sent -> respond_success.email_sent
+
+end // graph

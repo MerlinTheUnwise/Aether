@@ -1,0 +1,46 @@
+graph user_registration v1
+  effects: [database.read, database.write]
+
+  // ─── Nodes ───
+
+  node validate_email
+    in:  email: String @email @pii
+    out: valid: Bool, normalized: String @email @auth @pii
+    contracts:
+      pre:  email.length > 0
+      post: normalized.is_lowercase
+      post: normalized.is_trimmed
+    pure
+    confidence: 0.99
+  end
+
+  node check_uniqueness
+    in:  email: String @email @auth @pii
+    out: unique: Bool
+    effects: [database.read]
+    contracts:
+      post: unique <=> !exists(users, email)
+    recovery:
+      db_timeout -> retry(3, exponential)
+      db_error -> fallback(assume_unique: false)
+  end
+
+  node create_user
+    in:  email: String @email @auth @pii, unique: Bool @constraint("== true")
+    out: user: User @auth @pii
+    effects: [database.write]
+    contracts:
+      pre:  unique == true
+      post: user.email == email
+      post: user.status == active
+    recovery:
+      write_fail -> escalate("user creation failed", max_retries: 2)
+  end
+
+  // ─── Edges ───
+
+  edge validate_email.normalized -> check_uniqueness.email
+  edge validate_email.normalized -> create_user.email
+  edge check_uniqueness.unique -> create_user.unique
+
+end // graph

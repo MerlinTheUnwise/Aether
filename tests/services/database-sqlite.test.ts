@@ -3,11 +3,11 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { SQLiteDatabaseAdapter } from "../../src/implementations/services/database-sqlite.js";
+import { SQLiteDatabaseAdapter, isSQLiteAvailable } from "../../src/implementations/services/database-sqlite.js";
 import { existsSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 
-describe("SQLiteDatabaseAdapter", () => {
+describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
   const testDbs: SQLiteDatabaseAdapter[] = [];
 
   function createDb(path?: string): SQLiteDatabaseAdapter {

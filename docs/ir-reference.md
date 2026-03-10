@@ -1,50 +1,86 @@
 # AETHER-IR Reference
 
 > The complete specification of the AETHER Intermediate Representation.
-> This is the primary reference for generating valid AETHER programs.
+> This is the primary reference for the JSON IR that underlies all AETHER programs.
 
 ## Overview
 
-AETHER-IR is a JSON format representing computation graphs. Every AETHER tool operates on this format. The schema uses JSON Schema draft-07 with `additionalProperties: false` on all objects — no extra fields allowed.
+AETHER-IR is a JSON format representing computation graphs. The `.aether` surface syntax compiles down to this format via the parser. All AETHER tools operate on this IR internally. The schema uses JSON Schema draft-07 with `additionalProperties: false` on all objects -- no extra fields allowed.
+
+Each section below documents the IR structure and shows how it maps to the `.aether` surface syntax.
 
 ## AetherGraph (Top Level)
 
 The root object of every AETHER program.
 
-| Field | Type | Required | Default | Description |
+| Field | Type | Required | Default | Surface Syntax |
 |---|---|---|---|---|
-| `id` | string | ✓ | — | Unique graph identifier (snake_case) |
-| `version` | integer | ✓ | — | Schema version (≥ 1) |
-| `effects` | string[] | ✓ | — | Graph-level declared effects |
-| `nodes` | (AetherNode \| AetherHole \| IntentNode)[] | ✓ | — | All computation nodes |
-| `edges` | AetherEdge[] | ✓ | — | All data flow connections |
-| `partial` | boolean | — | false | Whether holes are allowed |
-| `sla` | object | — | — | `{ latency_ms?: number, availability?: number }` |
-| `state_types` | StateType[] | — | [] | State machine definitions |
-| `scopes` | Scope[] | — | [] | Scope definitions for large programs |
-| `templates` | AetherTemplate[] | — | [] | Template definitions |
-| `template_instances` | AetherTemplateInstance[] | — | [] | Template instantiations |
-| `metadata` | object | — | — | `{ description?, safety_level?, human_oversight? }` |
+| `id` | string | yes | -- | `graph my_graph v1` |
+| `version` | integer | yes | -- | `graph my_graph v1` |
+| `effects` | string[] | yes | -- | `effects: [db.read, email]` |
+| `nodes` | (AetherNode \| AetherHole \| IntentNode)[] | yes | -- | `node ...`, `hole ...`, `intent ...` blocks |
+| `edges` | AetherEdge[] | yes | -- | `edge src.port -> dst.port` |
+| `partial` | boolean | -- | false | `partial` keyword |
+| `sla` | object | -- | -- | `sla:` block under `metadata:` |
+| `state_types` | StateType[] | -- | [] | `statetype ... end` blocks |
+| `scopes` | Scope[] | -- | [] | `scope ... end` blocks |
+| `templates` | AetherTemplate[] | -- | [] | `template ... end` blocks |
+| `template_instances` | AetherTemplateInstance[] | -- | [] | `use template as id ... end` blocks |
+| `metadata` | object | -- | -- | `metadata:` block |
 
 **`metadata.safety_level`**: `"low"` | `"medium"` | `"high"`
 **`metadata.human_oversight`**: `{ required_when: string }` (e.g., `"confidence < 0.7"`)
+
+**Surface syntax example:**
+
+```aether
+graph payment_api v1
+  effects: [payment_gateway.write, database.write]
+  metadata:
+    description: "Payment processing API"
+    safety_level: high
+    human_oversight: "confidence < 0.7"
+    sla:
+      latency_ms: 200
+      availability: 99.9
+
+  // nodes, edges, etc.
+
+end // graph
+```
 
 ## AetherNode
 
 A computation unit in the graph.
 
-| Field | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `id` | string | ✓ | — | Unique within graph (snake_case) |
-| `in` | Record<string, TypeAnnotation> | ✓ | — | Input ports with types |
-| `out` | Record<string, TypeAnnotation> | ✓ | — | Output ports with types |
-| `contract` | Contract | ✓ | — | Pre/post/invariant conditions |
-| `effects` | string[] | ✓ | — | Declared side effects (empty = pure) |
-| `pure` | boolean | — | — | Shorthand for effects: [] |
-| `confidence` | number | — | — | 0.0–1.0. If < 0.85 → adversarial_check REQUIRED |
-| `adversarial_check` | AdversarialCheck | — | — | Conditions true when implementation is WRONG |
-| `recovery` | Record<string, RecoveryAction> | — | — | Error recovery strategies |
-| `supervised` | SupervisedBlock | — | — | Marks node as unverified with reason |
+| Field | Type | Required | Surface Syntax |
+|---|---|---|---|
+| `id` | string | yes | `node my_node` |
+| `in` | Record<string, TypeAnnotation> | yes | `in:  name: Type @ann` |
+| `out` | Record<string, TypeAnnotation> | yes | `out: name: Type @ann` |
+| `contract` | Contract | yes | `contracts:` block |
+| `effects` | string[] | yes | `effects: [db.read]` |
+| `pure` | boolean | -- | `pure` keyword |
+| `confidence` | number | -- | `confidence: 0.95` |
+| `adversarial_check` | AdversarialCheck | -- | `adversarial:` block |
+| `recovery` | Record<string, RecoveryAction> | -- | `recovery:` block |
+| `supervised` | SupervisedBlock | -- | `supervised: "reason" status` |
+
+**Surface syntax example:**
+
+```aether
+node check_uniqueness
+  in:  email: String @email @auth
+  out: unique: Bool
+  effects: [database.read]
+  contracts:
+    post: unique <=> !exists(users, email)
+  recovery:
+    db_timeout -> retry(3, exponential)
+    db_error -> fallback(assume_unique: false)
+  confidence: 0.95
+end
+```
 
 ### Validation Rules (MUST satisfy all)
 
@@ -56,11 +92,22 @@ A computation unit in the graph.
 
 ## Contract
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `pre` | string[] | — | Preconditions (must be true before execution) |
-| `post` | string[] | ✓ (≥1) | Postconditions (guaranteed after execution) |
-| `invariants` | string[] | — | Must hold throughout execution |
+| `pre` | string[] | -- | `pre:  expression` (one per line) |
+| `post` | string[] | yes (>=1) | `post: expression` (one per line) |
+| `invariants` | string[] | -- | `inv:  expression` (one per line) |
+
+**Surface syntax:** In `.aether`, contracts are written inside a `contracts:` block with `pre:`, `post:`, and `inv:` prefixes:
+
+```aether
+contracts:
+  pre:  amount > 0
+  pre:  card_token.length > 0
+  post: validated_amount == amount
+  post: status == created
+  inv:  status != captured
+```
 
 ### Contract Expression Syntax
 
@@ -88,13 +135,22 @@ Expressions are strings using these operators:
 
 ## AdversarialCheck
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `break_if` | string[] | ✓ (≥1) | Conditions that would be true if the implementation is WRONG |
+| `break_if` | string[] | yes (>=1) | `break_if: expression` (one per line) |
 
-The verifier asserts each `break_if` expression and checks for UNSAT. If SAT → the bad condition is possible → the implementation may be wrong.
+The verifier asserts each `break_if` expression and checks for UNSAT. If SAT -> the bad condition is possible -> the implementation may be wrong.
 
-**Example:**
+**Surface syntax:**
+
+```aether
+adversarial:
+  break_if: tax < 0
+  break_if: tax > income
+```
+
+<details><summary>IR equivalent (JSON)</summary>
+
 ```json
 {
   "break_if": [
@@ -105,9 +161,24 @@ The verifier asserts each `break_if` expression and checks for UNSAT. If SAT →
 }
 ```
 
+</details>
+
 ## RecoveryAction
 
-Each entry maps a condition name to a recovery strategy:
+Each entry maps a condition name to a recovery strategy.
+
+**Surface syntax:**
+
+```aether
+recovery:
+  db_timeout -> retry(3, exponential)
+  db_error -> fallback(unique: false)
+  auth_failure -> escalate("authentication failed")
+  not_found -> respond(404, "not found")
+  other_error -> report(channel: ops-alerts)
+```
+
+<details><summary>IR equivalent (JSON)</summary>
 
 ```json
 {
@@ -117,36 +188,48 @@ Each entry maps a condition name to a recovery strategy:
 }
 ```
 
-| Action | Params | Behavior |
-|---|---|---|
-| `retry` | `{ count: number, backoff?: "exponential" \| "linear" }` | Retry N times with delay |
-| `fallback` | `{ value?: any, node?: string }` | Return fallback value or delegate to another node |
-| `escalate` | `{ message: string, preserve_context?: boolean }` | Route to human oversight |
-| `respond` | `{ status: number, body: string }` | Return HTTP-like response |
-| `report` | `{ channel?: string }` | Log error and continue |
+</details>
+
+| Action | Surface Syntax | Params | Behavior |
+|---|---|---|---|
+| `retry` | `-> retry(3, exponential)` | `{ count, backoff? }` | Retry N times with delay |
+| `fallback` | `-> fallback(key: value)` | `{ value?, node? }` | Return fallback value or delegate |
+| `escalate` | `-> escalate("msg")` | `{ message, preserve_context? }` | Route to human oversight |
+| `respond` | `-> respond(401, "msg")` | `{ status, body }` | Return HTTP-like response |
+| `report` | `-> report(channel: name)` | `{ channel? }` | Log error and continue |
 
 ## SupervisedBlock
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `reason` | string | ✓ | Why this node can't be verified |
-| `review_status` | string | — | `"pending"` \| `"approved"` \| `"rejected"` |
+| `reason` | string | yes | `supervised: "reason" status` |
+| `review_status` | string | -- | `pending` \| `approved` \| `rejected` (after reason) |
+
+**Surface syntax:**
+
+```aether
+supervised: "null handling is domain-specific" pending
+```
 
 Supervised nodes contribute 0 to the verification score. Their contracts are asserted but not proven. They degrade the program's overall verification percentage.
 
 ## TypeAnnotation
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `type` | string | ✓ | Base type: `String`, `Bool`, `Int`, `Float64`, `Decimal`, `List<T>`, `Record`, `Map<K,V>` |
-| `domain` | string | — | Semantic domain: `"authentication"`, `"commerce"`, `"ml"` |
-| `unit` | string | — | Unit of measurement: `"kelvin"`, `"USD"`, `"ms"` |
-| `dimension` | string | — | Physical dimension: `"thermodynamic_temperature"`, `"currency"`, `"time"` |
-| `format` | string | — | Format constraint: `"email"`, `"uuid_v4"`, `"jwt"` |
-| `sensitivity` | string | — | Data sensitivity: `"pii"`, `"public"`, `"internal"` |
-| `range` | [number, number] | — | Value range: `[0, 100]` |
-| `constraint` | string | — | Value constraint: `"> 0.7"` (for confidence gates) |
-| `state_type` | string | — | Reference to a declared StateType |
+| `type` | string | yes | `String`, `Bool`, `Int`, `Float64`, `List<T>`, `Record`, `Map<K,V>` |
+| `domain` | string | -- | `@auth`, `@commerce`, `@payment`, `@ml`, `@support`, `@mod` |
+| `unit` | string | -- | `@USD`, `@EUR`, `@celsius`, `@ms`, `@seconds`, `@bytes`, `@percent` |
+| `dimension` | string | -- | (auto-set by unit annotations) |
+| `format` | string | -- | `@email`, `@uuid`, `@jwt`, `@phone`, `@url`, `@iso8601` |
+| `sensitivity` | string | -- | `@pii`, `@public`, `@internal` |
+| `range` | [number, number] | -- | `@range(0, 100)` |
+| `constraint` | string | -- | `@constraint("> 0.7")` |
+| `state_type` | string | -- | `@state_type("OrderLifecycle")` |
+
+**Surface syntax example:** `email: String @email @auth @pii` expands to `{ "type": "String", "format": "email", "domain": "authentication", "sensitivity": "pii" }`
+
+See the [Annotation Reference](type-system.md#annotation-reference) in the Type System guide for the complete list.
 
 ### Type Checking Rules
 
@@ -162,10 +245,17 @@ Supervised nodes contribute 0 to the verification score. Their contracts are ass
 
 ## AetherEdge
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `from` | string | ✓ | `"node_id.output_port_name"` |
-| `to` | string | ✓ | `"node_id.input_port_name"` |
+| `from` | string | yes | `edge source.port -> dest.port` |
+| `to` | string | yes | (part of the same `edge` statement) |
+
+**Surface syntax:**
+
+```aether
+edge validate_email.normalized -> check_uniqueness.email
+edge check_uniqueness.unique -> create_user.unique
+```
 
 ### Edge Validation Rules
 
@@ -178,11 +268,22 @@ Supervised nodes contribute 0 to the verification score. Their contracts are ass
 
 Used when `graph.partial = true`. A placeholder for a node not yet built.
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `id` | string | ✓ | Placeholder identifier |
-| `hole` | `true` | ✓ | Literal `true` — marks this as a hole |
-| `must_satisfy` | object | ✓ | Contracts the eventual node must satisfy |
+| `id` | string | yes | `hole my_hole` |
+| `hole` | `true` | yes | (implicit from `hole` keyword) |
+| `must_satisfy` | object | yes | `in:`, `out:`, `contracts:` inside the hole block |
+
+**Surface syntax:**
+
+```aether
+hole pending_validator
+  in:  data: String
+  out: valid: Bool
+  contracts:
+    post: valid == true || valid == false
+end
+```
 
 `must_satisfy` has the same shape as an AetherNode (`in`, `out`, `effects`, `contract`) but represents requirements, not implementation.
 
@@ -193,29 +294,60 @@ When filling a hole via the incremental builder:
 
 ## IntentNode (Layer 3)
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `id` | string | ✓ | Identifier |
-| `intent` | `true` | ✓ | Literal `true` — marks as intent |
-| `ensure` | string[] | ✓ | Properties that must be true of the output |
-| `in` | Record<string, TypeAnnotation> | ✓ | Input types |
-| `out` | Record<string, TypeAnnotation> | ✓ | Output types |
-| `effects` | string[] | — | Required effects |
-| `constraints` | object | — | `{ time_complexity?, space_complexity?, latency_ms?, deterministic? }` |
-| `confidence` | number | — | Minimum confidence required |
+| `id` | string | yes | `intent sort_results` |
+| `intent` | `true` | yes | (implicit from `intent` keyword) |
+| `ensure` | string[] | yes | `ensure: expression` (one per line) |
+| `in` | Record<string, TypeAnnotation> | yes | `in:  name: Type` |
+| `out` | Record<string, TypeAnnotation> | yes | `out: name: Type` |
+| `effects` | string[] | -- | `effects: [db.read]` |
+| `constraints` | object | -- | `constraints:` block |
+| `confidence` | number | -- | `confidence: 0.95` |
+
+**Surface syntax:**
+
+```aether
+intent sort_results
+  in:  collection: List<Transaction>
+  out: sorted: List<Transaction>
+  ensure: output is sorted by date
+  ensure: output is permutation of input
+  constraints:
+    time_complexity: O(n log n)
+    deterministic: true
+end
+```
 
 The intent resolver matches these against the certified algorithm library and replaces them with concrete implementations.
 
 ## StateType
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `id` | string | ✓ | State type identifier |
-| `states` | string[] | ✓ | All possible states (≥ 2) |
-| `transitions` | Transition[] | ✓ | Valid state transitions |
-| `invariants` | object | — | `{ never?: [{from, to}], terminal?: string[], initial?: string }` |
+| `id` | string | yes | `statetype OrderLifecycle` |
+| `states` | string[] | yes | `states: [s1, s2, s3]` |
+| `transitions` | Transition[] | yes | `from -> to when condition` |
+| `invariants.never` | [{from, to}] | -- | `never:` block |
+| `invariants.terminal` | string[] | -- | `terminal: [s1, s2]` |
+| `invariants.initial` | string | -- | `initial: s1` |
 
-**Transition:** `{ from: string, to: string, when: string }`
+**Surface syntax:**
+
+```aether
+statetype OrderLifecycle
+  states: [created, paid, shipped, delivered, cancelled]
+  transitions:
+    created -> paid when payment_confirmed
+    paid -> shipped when carrier_accepted
+  never:
+    cancelled -> paid
+  terminal: [delivered, cancelled]
+  initial: created
+end
+```
+
+**Transition (JSON):** `{ from: string, to: string, when: string }`
 
 **Validation rules:**
 - All states must be unique
@@ -226,14 +358,30 @@ The intent resolver matches these against the certified algorithm library and re
 
 ## Scope
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `id` | string | ✓ | Scope identifier |
-| `description` | string | — | What this scope does |
-| `nodes` | string[] | ✓ | Node IDs belonging to this scope |
-| `boundary_contracts` | object | — | `{ requires?: BoundaryContract[], provides?: BoundaryContract[] }` |
+| `id` | string | yes | `scope order_scope` |
+| `nodes` | string[] | yes | `nodes: [node1, node2]` |
+| `boundary_contracts.requires` | BoundaryContract[] | -- | `requires:` block |
+| `boundary_contracts.provides` | BoundaryContract[] | -- | `provides:` block |
 
-**BoundaryContract:** `{ name: string, in: Record<string, TypeAnnotation>, out: Record<string, TypeAnnotation>, contract?: Contract, effects?: string[], confidence?: number }`
+**Surface syntax:**
+
+```aether
+scope order_scope
+  nodes: [create_order, process_payment, ship_order]
+  provides:
+    order_data
+      out: order_id: String @uuid @commerce
+  end
+  requires:
+    payment_service
+      in: amount: Float64 @USD
+  end
+end
+```
+
+**BoundaryContract (JSON):** `{ name: string, in: Record<string, TypeAnnotation>, out: Record<string, TypeAnnotation>, contract?: Contract, effects?: string[], confidence?: number }`
 
 **Validation rules:**
 - Every node must belong to exactly one scope (if scopes are defined)
@@ -242,21 +390,47 @@ The intent resolver matches these against the certified algorithm library and re
 
 ## AetherTemplate
 
-| Field | Type | Required | Description |
+| Field | Type | Required | Surface Syntax |
 |---|---|---|---|
-| `id` | string | ✓ | Template identifier |
-| `description` | string | — | What this template does |
-| `parameters` | Parameter[] | ✓ | Template parameters |
-| `nodes` | AetherNode[] | ✓ | Template nodes (may reference $parameters) |
-| `edges` | AetherEdge[] | ✓ | Template edges |
-| `exposed_inputs` | Record<string, string> | — | External input mappings |
-| `exposed_outputs` | Record<string, string> | — | External output mappings |
+| `id` | string | yes | `template crud-entity` |
+| `parameters` | Parameter[] | yes | `params:` block with `$Name: kind` |
+| `nodes` | AetherNode[] | yes | `node ... end` blocks inside template |
+| `edges` | AetherEdge[] | yes | `edge ... -> ...` inside template |
 
-**Parameter:** `{ name: string, kind: "type" | "value" | "effect" | "node_id", constraint?: string }`
+**Surface syntax:**
 
-**AetherTemplateInstance:** `{ id: string, template: string, bindings: Record<string, any> }`
+```aether
+template crud-entity
+  params:
+    $Entity: type
+    $IdType: type
+    $storage_effect: effect
 
-Parameters are referenced with `$` prefix in template nodes: `{ "type": "$T" }`, `"$max_retries"`, `"$storage_effect"`.
+  node validate_input
+    in:  data: $Entity
+    out: validated: $Entity
+    contracts:
+      post: output.validated != null
+    pure
+  end
+
+  edge validate_input.validated -> create_entity.data
+end
+```
+
+**Parameter (JSON):** `{ name: string, kind: "type" | "value" | "effect" | "node_id", constraint?: string }`
+
+**AetherTemplateInstance:** Instantiated with `use template as instance_id ... end`:
+
+```aether
+use crud-entity as user_crud
+  Entity = Record @auth
+  IdType = String @uuid
+  storage_effect = database.write
+end
+```
+
+Parameters are referenced with `$` prefix in template nodes: `$Entity`, `$max_retries`, `$storage_effect`.
 
 ## Confidence Propagation
 

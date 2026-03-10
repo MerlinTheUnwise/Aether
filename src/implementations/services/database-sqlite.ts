@@ -12,7 +12,15 @@ import type { DatabaseAdapter } from "./adapter.js";
 import type { QueryFilter } from "./database.js";
 
 const require = createRequire(import.meta.url);
-const Database = require("better-sqlite3");
+let Database: any;
+try {
+  Database = require("better-sqlite3");
+} catch {
+  Database = null;
+}
+
+/** Whether better-sqlite3 is available in this environment */
+export const isSQLiteAvailable = Database !== null;
 
 export class SQLiteDatabaseAdapter implements DatabaseAdapter {
   private db: any;
@@ -20,6 +28,13 @@ export class SQLiteDatabaseAdapter implements DatabaseAdapter {
   private dbPath: string;
 
   constructor(dbPath?: string) {
+    if (!Database) {
+      throw new Error(
+        "SQLite adapter requires better-sqlite3. Install with: npm install better-sqlite3\n" +
+        "Requires: node-gyp, Python 3, C++ compiler (Visual Studio Build Tools on Windows)\n" +
+        "See: https://github.com/JoshuaWise/better-sqlite3/blob/master/docs/troubleshooting.md"
+      );
+    }
     this.dbPath = dbPath ?? ":memory:";
     this.db = new Database(this.dbPath);
     this.db.pragma("journal_mode = WAL");

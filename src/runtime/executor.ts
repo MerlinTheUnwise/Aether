@@ -17,6 +17,8 @@ import type { ExecutionProfiler } from "./profiler.js";
 import type { RuntimeCompiler } from "./jit.js";
 import { checkContract, checkAdversarial, AdversarialViolation } from "./evaluator/checker.js";
 export { AdversarialViolation } from "./evaluator/checker.js";
+import { executeRecovery } from "./recovery.js";
+export { EscalationError, matchesCondition, retryWithBackoff, executeRecovery } from "./recovery.js";
 import type { ImplementationRegistry } from "../implementations/registry.js";
 import type { ServiceContainer } from "../implementations/services/container.js";
 import type { NodeImplementation, ImplementationContext } from "../implementations/types.js";
@@ -109,15 +111,7 @@ export class ContractViolation extends Error {
   }
 }
 
-export class EscalationError extends Error {
-  nodeId: string;
-
-  constructor(nodeId: string, message?: string) {
-    super(`Escalation required for "${nodeId}"${message ? `: ${message}` : ""}`);
-    this.name = "EscalationError";
-    this.nodeId = nodeId;
-  }
-}
+// EscalationError re-exported from ./recovery.ts
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -260,6 +254,12 @@ function gatherInputs(
       }
     }
 
+    // Fall back to per-node inputs (graphInputs[nodeId][portName])
+    if (!found && graphInputs[node.id] && typeof graphInputs[node.id] === "object" && portName in graphInputs[node.id]) {
+      inputs[portName] = graphInputs[node.id][portName];
+      found = true;
+    }
+
     // Fall back to graph-level inputs
     if (!found && portName in graphInputs) {
       inputs[portName] = graphInputs[portName];
@@ -270,71 +270,7 @@ function gatherInputs(
 }
 
 // ─── Recovery ────────────────────────────────────────────────────────────────
-
-function matchesCondition(error: Error, condition: string): boolean {
-  const msg = error.message.toLowerCase();
-  const cond = condition.toLowerCase();
-  // Match if condition appears in error message, or error type matches
-  return msg.includes(cond) || (error as any).type === condition || (error as any).code === condition;
-}
-
-async function retryWithBackoff(
-  node: AetherNode,
-  inputs: Record<string, any>,
-  context: ExecutionContext,
-  params?: Record<string, unknown>
-): Promise<Record<string, any>> {
-  const count = (params?.count as number) ?? (params?.attempts as number) ?? 3;
-  const backoff = (params?.backoff as string) ?? "exponential";
-
-  for (let attempt = 1; attempt <= count; attempt++) {
-    const delay = backoff === "exponential" ? 100 * Math.pow(2, attempt) : 100 * attempt;
-    await new Promise(r => setTimeout(r, delay));
-    try {
-      const impl = context.nodeImplementations.get(node.id);
-      if (impl) return await impl(inputs);
-    } catch (e) {
-      if (attempt === count) throw e;
-    }
-  }
-  throw new Error(`Retry exhausted for "${node.id}"`);
-}
-
-async function executeRecoveryStrategy(
-  node: AetherNode,
-  error: Error,
-  inputs: Record<string, any>,
-  context: ExecutionContext
-): Promise<Record<string, any>> {
-  if (!node.recovery) throw error;
-
-  for (const [condition, action] of Object.entries(node.recovery)) {
-    if (matchesCondition(error, condition)) {
-      const act = action as { action: string; params?: Record<string, unknown> };
-      switch (act.action) {
-        case "retry":
-          return await retryWithBackoff(node, inputs, context, act.params);
-        case "fallback":
-          return act.params?.value as Record<string, any> ?? generateDefaults(node.out);
-        case "escalate":
-          if (context.onOversightRequired) {
-            return await context.onOversightRequired(
-              node.id, 0, { error, message: act.params?.message }
-            );
-          }
-          throw new EscalationError(node.id, act.params?.message as string);
-        case "respond":
-          return { status: act.params?.status, body: act.params?.body };
-        case "report":
-          console.error(`[AETHER:${node.id}] ${error.message}`);
-          throw error;
-        default:
-          throw error;
-      }
-    }
-  }
-  throw error;
-}
+// Recovery logic extracted to ./recovery.ts (matchesCondition, retryWithBackoff, executeRecovery)
 
 // ─── Node Execution ──────────────────────────────────────────────────────────
 
@@ -458,7 +394,7 @@ async function executeNode(
       result = await implFn!(inputs);
     } catch (error) {
       // 5. Recovery — need to adapt retryWithBackoff to use resolved impl
-      result = await executeRecoveryStrategy(node, error as Error, inputs, context);
+      result = await executeRecovery(node, error as Error, inputs, context);
     }
   }
 

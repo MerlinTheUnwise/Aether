@@ -1,0 +1,85 @@
+// Daily revenue report pipeline mixing intent and structural nodes
+//
+
+graph daily-report v1
+  effects: [database.read, email]
+
+  metadata:
+    description: "Daily revenue report pipeline mixing intent and structural nodes"
+
+  // ─── Nodes ───
+
+  node fetch_data
+    in:  query: String
+    out: transactions: List<Transaction>
+    effects: [database.read]
+    contracts:
+      pre:  input.query != null
+      post: output.transactions != null
+    recovery:
+      db_timeout -> retry(exponential)
+  end
+
+  intent sort_results
+    in:  collection: List<Transaction>
+    out: sorted: List<Transaction>
+    ensure: output is sorted by date
+    ensure: output is permutation of input
+    ensure: length preserved
+    constraints:
+      time_complexity: O(n log n)
+      deterministic: true
+  end
+
+  intent remove_dupes
+    in:  collection: List<Transaction>
+    out: deduplicated: List<Transaction>
+    ensure: output has no duplicates
+    ensure: output is subset of input
+    ensure: all unique elements preserved
+    constraints:
+      deterministic: true
+  end
+
+  intent sum_revenue
+    in:  collection: List<Transaction>, accessor: Accessor<Transaction, Numeric>
+    out: total: Numeric
+    ensure: total equals sum of amounts
+    ensure: output.total == sum of accessor(element) for all elements
+    constraints:
+      deterministic: true
+    confidence: 0.95
+  end
+
+  node format_report
+    in:  total: Numeric, transactions: List<Transaction>
+    out: report: String
+    contracts:
+      pre:  input.total != null
+      pre:  input.transactions != null
+      post: output.report != null
+      post: output.report.length > 0
+    pure
+  end
+
+  node deliver
+    in:  report: String
+    out: sent: Bool
+    effects: [email]
+    contracts:
+      pre:  input.report != null
+      post: output.sent == true
+    recovery:
+      send_failure -> retry(linear)
+  end
+
+  // ─── Edges ───
+
+  edge fetch_data.transactions -> sort_results.collection
+  edge sort_results.sorted -> remove_dupes.collection
+  edge remove_dupes.deduplicated -> sum_revenue.collection
+  edge remove_dupes.deduplicated -> format_report.transactions
+  edge sum_revenue.total -> format_report.total
+  edge format_report.report -> deliver.report
+
+end // graph

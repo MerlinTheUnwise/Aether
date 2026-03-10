@@ -7,12 +7,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execute, createExecutionContext } from "../../src/runtime/executor.js";
-import { SQLiteDatabaseAdapter } from "../../src/implementations/services/database-sqlite.js";
+import { SQLiteDatabaseAdapter, isSQLiteAvailable } from "../../src/implementations/services/database-sqlite.js";
 import { RealFilesystemAdapter } from "../../src/implementations/services/filesystem-real.js";
 import { readFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
-describe("Real Execution — SQLite", () => {
+describe.skipIf(!isSQLiteAvailable)("Real Execution — SQLite", () => {
   const testDir = join(process.cwd(), "test-output", "real-exec-" + process.pid);
 
   beforeEach(() => {
@@ -124,7 +124,7 @@ describe("Real Execution — SQLite", () => {
 });
 
 describe("Real Execution — Container Mode Switch", () => {
-  it("ServiceContainer in real mode creates SQLite adapter", async () => {
+  it.skipIf(!isSQLiteAvailable)("ServiceContainer in real mode creates SQLite adapter", async () => {
     const { ServiceContainer } = await import("../../src/implementations/services/container.js");
 
     const container = ServiceContainer.createDefault({

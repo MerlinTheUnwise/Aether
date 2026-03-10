@@ -1,0 +1,137 @@
+// Real local I/O pipeline: reads CSV/JSON from disk, validates, cleans, deduplicates, detects anomalies, computes analytics, writes CSV/HTML/JSON output files
+//
+
+graph transaction_analysis_pipeline v1
+  effects: [filesystem.read, filesystem.write, ml_model.infer]
+
+  metadata:
+    description: "Real local I/O pipeline: reads CSV/JSON from disk, validates, cleans, deduplicates, detects anomalies, computes analytics, writes CSV/HTML/JSON output files"
+    safety_level: standard
+
+  // ─── Nodes ───
+
+  node read_transactions
+    in:  file_path: String
+    out: data: List<Record>
+    effects: [filesystem.read]
+    contracts:
+      post: data.length > 0
+    recovery:
+      file_not_found -> escalate("transactions.csv not found")
+  end
+
+  node read_customers
+    in:  file_path: String
+    out: customers: List<Record>
+    effects: [filesystem.read]
+    contracts:
+      post: customers.length > 0
+    recovery:
+      file_not_found -> escalate("customers.json not found")
+  end
+
+  node read_categories
+    in:  file_path: String
+    out: categories: List<Record>
+    effects: [filesystem.read]
+    contracts:
+      post: categories.length > 0
+    recovery:
+      file_not_found -> escalate("categories.json not found")
+  end
+
+  node validate_txn_records
+    in:  data: List<Record>
+    out: valid: List<Record>, invalid: List<Record>
+    contracts:
+      post: valid.length + invalid.length == data.length
+    pure
+  end
+
+  node join_customer_data
+    in:  data: List<Record>, customers: List<Record>
+    out: enriched: List<Record>
+    contracts:
+      post: enriched.length == data.length
+    pure
+  end
+
+  node clean_and_dedupe
+    in:  valid: List<Record>
+    out: cleaned: List<Record>
+    contracts:
+      post: cleaned.length <= valid.length
+    pure
+  end
+
+  node detect_txn_anomalies
+    in:  cleaned: List<Record>
+    out: normal: List<Record>, anomalies: List<Record>
+    effects: [ml_model.infer]
+    contracts:
+      post: normal.length + anomalies.length == cleaned.length
+    recovery:
+      model_error -> fallback(value: "{\"normal\":[],\"anomalies\":[]}")
+    adversarial:
+      break_if: anomalies.length > cleaned.length * 0.5
+    confidence: 0.82
+  end
+
+  node calculate_analytics
+    in:  data: List<Record>, customers: List<Record>, categories: List<Record>, anomalies: List<Record>
+    out: analytics: Record
+    contracts:
+      post: analytics.revenue_by_region.length > 0
+    pure
+  end
+
+  node generate_txn_report
+    in:  analytics: Record, anomalies: List<Record>, cleaned: List<Record>, invalid: List<Record>
+    out: report: Record
+    pure
+  end
+
+  node write_csv_output
+    in:  cleaned: List<Record>, output_dir: String
+    out: csv_path: String
+    effects: [filesystem.write]
+    recovery:
+      disk_error -> escalate("failed to write CSV output")
+  end
+
+  node write_report
+    in:  report: Record, output_dir: String
+    out: report_path: String
+    effects: [filesystem.write]
+    recovery:
+      disk_error -> escalate("failed to write HTML report")
+  end
+
+  node write_summary
+    in:  report: Record, output_dir: String
+    out: summary_path: String
+    effects: [filesystem.write]
+    recovery:
+      disk_error -> escalate("failed to write JSON summary")
+  end
+
+  // ─── Edges ───
+
+  edge read_transactions.data -> validate_txn_records.data
+  edge read_transactions.data -> join_customer_data.data
+  edge read_customers.customers -> join_customer_data.customers
+  edge validate_txn_records.valid -> clean_and_dedupe.valid
+  edge clean_and_dedupe.cleaned -> detect_txn_anomalies.cleaned
+  edge detect_txn_anomalies.normal -> calculate_analytics.data
+  edge read_customers.customers -> calculate_analytics.customers
+  edge read_categories.categories -> calculate_analytics.categories
+  edge detect_txn_anomalies.anomalies -> calculate_analytics.anomalies
+  edge calculate_analytics.analytics -> generate_txn_report.analytics
+  edge detect_txn_anomalies.anomalies -> generate_txn_report.anomalies
+  edge clean_and_dedupe.cleaned -> generate_txn_report.cleaned
+  edge validate_txn_records.invalid -> generate_txn_report.invalid
+  edge clean_and_dedupe.cleaned -> write_csv_output.cleaned
+  edge generate_txn_report.report -> write_report.report
+  edge generate_txn_report.report -> write_summary.report
+
+end // graph

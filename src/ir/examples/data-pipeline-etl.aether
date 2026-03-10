@@ -1,0 +1,78 @@
+// ETL data pipeline with data quality contracts and batch processing
+//
+
+graph data_pipeline_etl v1
+  effects: [database.read, database.write, filesystem]
+
+  metadata:
+    description: "ETL data pipeline with data quality contracts and batch processing"
+
+  // ─── Nodes ───
+
+  node fetch_raw_data
+    in:  source_uri: String, batch_size: Int @range(1, 100000)
+    out: raw_records: List<Record>, record_count: Int
+    effects: [database.read]
+    contracts:
+      post: record_count >= 0
+    recovery:
+      connection_error -> retry(exponential)
+      source_unavailable -> escalate("data source unavailable")
+  end
+
+  node validate_schema
+    in:  raw_records: List<Record>
+    out: valid_records: List<Record>, invalid_count: Int
+    contracts:
+      post: invalid_count >= 0
+    pure
+  end
+
+  node clean_nulls
+    in:  valid_records: List<Record>
+    out: cleaned_records: List<Record>
+    contracts:
+      post: cleaned_records.length >= 0
+    supervised: "null handling strategy is domain-specific" pending
+    pure
+  end
+
+  node deduplicate
+    in:  cleaned_records: List<Record>
+    out: unique_records: List<Record>, duplicates_removed: Int
+    contracts:
+      post: duplicates_removed >= 0
+    pure
+  end
+
+  node aggregate
+    in:  unique_records: List<Record>
+    out: aggregated_data: List<Record>, checksum: String
+    contracts:
+      post: checksum.length > 0
+    pure
+  end
+
+  node write_output
+    in:  aggregated_data: List<Record>, checksum: String
+    out: rows_written: Int, success: Bool
+    effects: [database.write, filesystem]
+    contracts:
+      pre:  checksum.length > 0
+      post: rows_written >= 0
+      post: success == true
+    recovery:
+      write_timeout -> retry(exponential)
+      write_failed -> escalate("output write failed")
+  end
+
+  // ─── Edges ───
+
+  edge fetch_raw_data.raw_records -> validate_schema.raw_records
+  edge validate_schema.valid_records -> clean_nulls.valid_records
+  edge clean_nulls.cleaned_records -> deduplicate.cleaned_records
+  edge deduplicate.unique_records -> aggregate.unique_records
+  edge aggregate.aggregated_data -> write_output.aggregated_data
+  edge aggregate.checksum -> write_output.checksum
+
+end // graph

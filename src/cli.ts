@@ -11,7 +11,7 @@
  *   help                    Show usage
  */
 
-import { readFileSync, writeFileSync as fsWriteFileSync } from "fs";
+import { readFileSync, writeFileSync as fsWriteFileSync, existsSync } from "fs";
 import path from "path";
 import { join } from "path";
 import { fileURLToPath } from "url";
@@ -26,6 +26,8 @@ import { extractScope, verifyScope, checkBoundaryCompatibility, computeScopeOrde
 import { simulateWithStubs } from "./agents/simulator.js";
 import { resolveGraph, loadCertifiedLibrary } from "./compiler/resolver.js";
 import { diffGraphs, hasBreakingChanges, affectedNodes } from "./compiler/diff.js";
+import * as parserBridge from "./parser/bridge.js";
+import * as parserErrors from "./parser/errors.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +42,18 @@ interface AetherGraph {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function loadGraph(filePath: string): AetherGraph {
+  if (filePath.endsWith(".aether")) {
+    const source = readFileSync(filePath, "utf-8");
+    const { graph, errors } = parserBridge.aetherToIR(source);
+    if (errors.length > 0) {
+      for (const err of errors) {
+        console.error(parserErrors.formatError(err, filePath));
+        console.error("");
+      }
+      process.exit(1);
+    }
+    return graph as unknown as AetherGraph;
+  }
   const raw = JSON.parse(readFileSync(filePath, "utf-8")) as AetherGraph;
   return raw;
 }
@@ -65,6 +79,9 @@ Commands:
                                   --db-path <path>  SQLite database file (real mode)
                                   --fs-path <path>  Filesystem sandbox base path (real mode)
   visualize <path> [--output <p>] [--execute] [--open]  Generate HTML visualization
+  parse <path.aether>             Parse and validate .aether file
+  format <path> [--output <p>]   Convert between .aether and .json formats
+  init <name.aether>             Scaffold a new .aether file with starter template
   expand <path>                  Parse compact .aether form to IR JSON
   scope <path> <scope-id>        Extract and validate a single scope
   scope-check <path>             Validate all scopes and boundary compatibility
@@ -85,6 +102,18 @@ Commands:
                                    Diff two graph versions as HTML report
   editor [path] [--output <p>] [--open]  Open interactive visual graph editor
   demo [--output <p>] [--open]           Generate interactive demo HTML
+  ai "<description>"                     Generate AETHER-IR from natural language (requires ANTHROPIC_API_KEY)
+  ai-test [--scenarios all|<id>] [--report]  Run bug detection scenarios against Claude
+  run-pipeline <path> [options]              Run real I/O pipeline with filesystem access
+                                  --fs-path <path>  Filesystem sandbox base (default: .)
+                                  --inputs <json>   Pipeline inputs (paths, output_dir)
+                                  --contracts enforce|warn|skip
+  serve [path] [options]                     Start live dashboard server
+                                  --port <n>        Server port (default: 3000)
+                                  --fs-path <dir>   Filesystem base for real I/O
+                                  --db-path <file>  SQLite database path
+                                  --mode mock|real  Service mode (default: mock)
+                                  --open            Auto-open browser
 
 Registry:
   registry init                  Initialize local registry at ~/.aether/registry
@@ -102,7 +131,12 @@ Registry:
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
 function cmdValidate(filePath: string): boolean {
-  const raw = JSON.parse(readFileSync(filePath, "utf-8")) as unknown;
+  let raw: unknown;
+  if (filePath.endsWith(".aether")) {
+    raw = loadGraph(filePath);
+  } else {
+    raw = JSON.parse(readFileSync(filePath, "utf-8"));
+  }
   const result = validateGraph(raw);
   const graph = raw as AetherGraph;
 
@@ -201,8 +235,7 @@ async function cmdReport(filePath: string, outputDir: string): Promise<ReportRes
   console.log(sep);
 
   // 1. Validate
-  const raw = JSON.parse(readFileSync(filePath, "utf-8")) as unknown;
-  const valResult = validateGraph(raw);
+  const valResult = validateGraph(graph as any);
   if (valResult.valid) {
     result.schemaValid = true;
     console.log(`Schema:         ✓ valid`);
@@ -1320,6 +1353,100 @@ function cmdDiff(filePath1: string, filePath2: string): DiffResult {
   };
 }
 
+// ─── Parser Commands ─────────────────────────────────────────────────────────
+
+function cmdParse(filePath: string): void {
+  const source = readFileSync(filePath, "utf-8");
+  const { graph, errors } = parserBridge.aetherToIR(source);
+
+  if (errors.length > 0) {
+    for (const err of errors) {
+      console.error(parserErrors.formatError(err, filePath));
+      console.error("");
+    }
+    process.exit(1);
+  }
+
+  if (graph) {
+    const nodeCount = graph.nodes.length;
+    const edgeCount = graph.edges.length;
+    console.log(`✓ Valid AETHER program: ${graph.id} (${nodeCount} nodes, ${edgeCount} edges)`);
+  }
+}
+
+function cmdFormat(filePath: string, outputDir: string, args: string[]): void {
+  const outputIdx = args.indexOf("--output");
+  const outputPath = outputIdx >= 0 && args[outputIdx + 1] ? args[outputIdx + 1] : undefined;
+
+  if (filePath.endsWith(".aether")) {
+    // .aether → JSON
+    const source = readFileSync(filePath, "utf-8");
+    const { graph, errors } = parserBridge.aetherToIR(source);
+    if (errors.length > 0) {
+      for (const err of errors) {
+        console.error(parserErrors.formatError(err, filePath));
+        console.error("");
+      }
+      process.exit(1);
+    }
+    const json = JSON.stringify(graph, null, 2);
+    if (outputPath) {
+      fsWriteFileSync(outputPath, json, "utf-8");
+      console.log(`✓ Converted ${filePath} → ${outputPath}`);
+    } else {
+      const defaultPath = filePath.replace(/\.aether$/, ".json");
+      fsWriteFileSync(defaultPath, json, "utf-8");
+      console.log(`✓ Converted ${filePath} → ${defaultPath}`);
+    }
+  } else if (filePath.endsWith(".json")) {
+    // JSON → .aether
+    const graph = JSON.parse(readFileSync(filePath, "utf-8"));
+    const aetherSource = parserBridge.irToAether(graph);
+    if (outputPath) {
+      fsWriteFileSync(outputPath, aetherSource, "utf-8");
+      console.log(`✓ Converted ${filePath} → ${outputPath}`);
+    } else {
+      const defaultPath = filePath.replace(/\.json$/, ".aether");
+      fsWriteFileSync(defaultPath, aetherSource, "utf-8");
+      console.log(`✓ Converted ${filePath} → ${defaultPath}`);
+    }
+  } else {
+    console.error("Error: format command requires a .json or .aether file");
+    process.exit(1);
+  }
+}
+
+function cmdInit(filePath: string): void {
+  const name = path.basename(filePath, ".aether").replace(/[^a-zA-Z0-9_]/g, "_");
+
+  const template = `// ${name.replace(/_/g, " ")}
+// Created with: npx tsx src/cli.ts init
+
+graph ${name} v1
+  effects: []
+
+  // Add your first node:
+  node example_node
+    in:  input: String
+    out: output: String
+    contracts:
+      post: output.length > 0
+    pure
+    confidence: 0.99
+  end
+
+  // Add more nodes here...
+
+  // Wire edges:
+  // edge source_node.port -> dest_node.port
+
+end
+`;
+
+  fsWriteFileSync(filePath, template, "utf-8");
+  console.log(`✓ Created ${filePath}`);
+}
+
 // ─── Compact/Expand Commands ─────────────────────────────────────────────────
 
 async function cmdCompact(filePath: string, outputDir: string): Promise<void> {
@@ -1592,6 +1719,145 @@ async function cmdJIT(filePath: string, runs: number, threshold: number, optimiz
   console.log(sep);
 }
 
+// ─── Run Pipeline Command ─────────────────────────────────────────────────────
+
+async function cmdRunPipeline(filePath: string, cliArgs: string[]): Promise<void> {
+  const { execute, createExecutionContext } = await import("./runtime/executor.js");
+  const { existsSync } = await import("fs");
+  const graph = loadGraph(filePath);
+
+  // Parse flags
+  const inputsIdx = cliArgs.indexOf("--inputs");
+  const inputsArg = inputsIdx >= 0 ? cliArgs[inputsIdx + 1] : undefined;
+  const fsPathIdx = cliArgs.indexOf("--fs-path");
+  const fsPathArg = fsPathIdx >= 0 ? cliArgs[fsPathIdx + 1] : ".";
+  const contractsIdx = cliArgs.indexOf("--contracts");
+  const contractsArg = (contractsIdx >= 0 ? cliArgs[contractsIdx + 1] : "enforce") as "enforce" | "warn" | "skip";
+
+  let inputs: Record<string, any> = {};
+  if (inputsArg) {
+    const raw = inputsArg.startsWith("{") ? inputsArg : readFileSync(inputsArg, "utf-8");
+    inputs = JSON.parse(raw);
+  }
+
+  const sep = "═══════════════════════════════════════════";
+  const thin = "───────────────────────────────────────────";
+
+  console.log(sep);
+  console.log(`AETHER Pipeline: ${graph.id} (v${graph.version})`);
+  console.log(sep);
+
+  // Build service config for real filesystem mode
+  const serviceConfig: any = {
+    mode: "real",
+    real: {
+      filesystem: { basePath: path.resolve(fsPathArg) },
+    },
+  };
+
+  // Map pipeline inputs to node inputs
+  const pipelineInputs: Record<string, any> = {};
+  if (inputs.transactions_path) {
+    pipelineInputs["read_transactions"] = { file_path: inputs.transactions_path };
+  }
+  if (inputs.customers_path) {
+    pipelineInputs["read_customers"] = { file_path: inputs.customers_path };
+  }
+  if (inputs.categories_path) {
+    pipelineInputs["read_categories"] = { file_path: inputs.categories_path };
+  }
+  if (inputs.output_dir) {
+    pipelineInputs["write_csv_output"] = { output_dir: inputs.output_dir };
+    pipelineInputs["write_report"] = { output_dir: inputs.output_dir };
+    pipelineInputs["write_summary"] = { output_dir: inputs.output_dir };
+  }
+
+  const ctx = await createExecutionContext(graph as any, pipelineInputs, {
+    serviceConfig,
+    contractMode: contractsArg,
+  });
+
+  // Resolve all and print resolution report
+  const resolution = ctx.registry!.resolveAll(graph as any);
+  console.log(`Mode:           REAL (filesystem: ${path.resolve(fsPathArg)})`);
+  console.log(`Implementations: ${resolution.resolved.size} resolved`);
+  if (resolution.unresolved.length > 0) {
+    console.log(`Unresolved:     ${resolution.unresolved.join(", ")}`);
+  }
+  console.log(`Contracts:      ${contractsArg}`);
+  console.log(`Inputs:         ${JSON.stringify(inputs)}`);
+  console.log("");
+
+  const startTime = Date.now();
+  const result = await execute(ctx);
+  const totalTime = Date.now() - startTime;
+
+  // Print wave-by-wave log
+  let currentWave = -1;
+  for (const entry of result.executionLog) {
+    if (entry.wave !== currentWave) {
+      currentWave = entry.wave;
+    }
+    const waveNodes = result.executionLog
+      .filter(e => e.wave === entry.wave)
+      .map(e => e.nodeId);
+
+    if (waveNodes[0] === entry.nodeId) {
+      const nodeList = waveNodes.join(", ");
+      const waveEntries = result.executionLog.filter(e => e.wave === entry.wave);
+      const maxDuration = Math.max(...waveEntries.map(e => e.duration_ms));
+      const minConf = Math.min(...waveEntries.map(e => e.confidence));
+      const anySkipped = waveEntries.some(e => e.skipped);
+      const status = anySkipped ? "⊘" : "✓";
+
+      const effects = waveEntries.flatMap(e => e.effects);
+      const effectStr = effects.length > 0 ? `  effects: [${[...new Set(effects)].join(", ")}]` : "";
+
+      console.log(`Wave ${entry.wave}: [${nodeList}]`);
+      console.log(`  ${status} ${Math.round(maxDuration)}ms  confidence: ${minConf.toFixed(2)}  contracts: ✓${effectStr}`);
+
+      for (const we of waveEntries) {
+        const outputs = result.outputs[we.nodeId];
+        if (outputs) {
+          const preview = JSON.stringify(outputs);
+          const truncated = preview.length > 100 ? preview.slice(0, 97) + "..." : preview;
+          console.log(`  → ${we.nodeId}: ${truncated}`);
+        }
+      }
+    }
+  }
+
+  console.log(thin);
+  console.log(`Total:  ${result.nodesExecuted + result.nodesSkipped} nodes, ${result.waves} waves, ${totalTime}ms`);
+
+  if (result.contractReport) {
+    const cr = result.contractReport;
+    console.log(`Contracts: ${cr.passed}/${cr.totalChecked} passed, ${cr.violated} violated, ${cr.unevaluable} unevaluable`);
+  }
+
+  console.log(`Final confidence: ${result.confidence.toFixed(2)}`);
+
+  if (result.effectsPerformed.length > 0) {
+    const unique = [...new Set(result.effectsPerformed)];
+    console.log(`Effects: ${unique.join(", ")}`);
+  }
+
+  // Check output files
+  if (inputs.output_dir) {
+    const outputDir = path.resolve(fsPathArg, inputs.output_dir);
+    console.log("");
+    console.log("Output files:");
+    const files = ["cleaned_transactions.csv", "report.html", "summary.json"];
+    for (const file of files) {
+      const fp = path.join(outputDir, file);
+      const exists = existsSync(fp);
+      console.log(`  ${exists ? "✓" : "✗"} ${fp}`);
+    }
+  }
+
+  console.log(sep);
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 const __cliFilename = fileURLToPath(import.meta.url);
@@ -1613,7 +1879,7 @@ if (__isCliMain) {
     process.exit(0);
   }
 
-  const noFileCommands = new Set(["incremental", "registry", "search", "install"]);
+  const noFileCommands = new Set(["incremental", "registry", "search", "install", "ai-test"]);
   if (!cliFilePath && !noFileCommands.has(command)) {
     console.error("Error: missing <path-to-json> argument");
     printUsage();
@@ -1680,6 +1946,21 @@ if (__isCliMain) {
         case "visualize":
           await cmdVisualize(cliFilePath, args);
           break;
+
+        case "parse": {
+          cmdParse(cliFilePath);
+          break;
+        }
+
+        case "format": {
+          cmdFormat(cliFilePath, outputDir, args);
+          break;
+        }
+
+        case "init": {
+          cmdInit(cliFilePath);
+          break;
+        }
 
         case "compact":
           await cmdCompact(cliFilePath, outputDir);
@@ -2463,8 +2744,19 @@ if (__isCliMain) {
           const { generateEditor } = await import("./editor/generate.js");
           const { writeFileSync: writeEditor } = await import("fs");
 
-          const editorGraph = cliFilePath ? loadGraph(cliFilePath) : undefined;
-          const html = generateEditor(editorGraph as any);
+          let editorGraph: any = undefined;
+          const isNew = args.includes("--new");
+          const templateIdx = args.indexOf("--template");
+          const templateName = templateIdx >= 0 && args[templateIdx + 1] ? args[templateIdx + 1] : undefined;
+
+          if (isNew) {
+            // Open empty editor for new graph creation
+            editorGraph = undefined;
+          } else if (cliFilePath) {
+            editorGraph = loadGraph(cliFilePath);
+          }
+
+          const html = generateEditor(editorGraph as any, { template: templateName });
 
           const editorOutputIdx = args.indexOf("--output");
           const editorOutputPath = editorOutputIdx >= 0 && args[editorOutputIdx + 1]
@@ -2503,6 +2795,168 @@ if (__isCliMain) {
             const cmd = platform === "win32" ? "start" : platform === "darwin" ? "open" : "xdg-open";
             exec(`${cmd} "${demoOutputPath}"`);
           }
+          break;
+        }
+
+        case "ai": {
+          const { generateFromDescription, irToAether: aiIrToAether } = await import("./ai/generate.js") as any;
+          const { irToAether: bridgeIrToAether } = await import("./parser/bridge.js");
+          const { writeFileSync: writeAi, mkdirSync } = await import("fs");
+
+          // cliFilePath is the description string (args[1])
+          const description = cliFilePath;
+          if (!description) {
+            console.error('Error: missing description. Usage: npx tsx src/cli.ts ai "Build a ..." [--format aether|json]');
+            process.exit(1);
+          }
+
+          const formatIdx = args.indexOf("--format");
+          const aiFormat = (formatIdx >= 0 && args[formatIdx + 1]) ? args[formatIdx + 1] as "aether" | "json" : "aether";
+
+          const sep = "═══════════════════════════════════════════════════════════════════";
+          console.log(sep);
+          console.log(`AETHER AI Generation (${aiFormat}): "${description.slice(0, 60)}${description.length > 60 ? "..." : ""}"`);
+          console.log(sep);
+
+          try {
+            const result = await (generateFromDescription as Function)({ description, format: aiFormat });
+
+            const lastAttempt = result.attempts[result.attempts.length - 1];
+            const nodeCount = result.graph?.nodes?.length ?? 0;
+            const attemptNum = lastAttempt?.attemptNumber ?? 0;
+            const maxAttempts = 3;
+
+            console.log(`Generation:    ${lastAttempt?.parseSuccess ? "✓" : "✗"} Claude generated ${nodeCount}-node graph (attempt ${attemptNum}/${maxAttempts})`);
+
+            if (result.finalValidation) {
+              const v = result.finalValidation;
+              console.log(`Validation:    ${v.valid ? "✓" : "✗"} schema ${v.errors.length === 0 ? "✓" : "✗"} structure ${v.errors.length === 0 ? "✓" : "✗"} types ${v.errors.length === 0 ? "✓" : "✗"}`);
+            }
+
+            if (result.finalVerification) {
+              const vr = result.finalVerification;
+              console.log(`Verification:  ${vr.nodes_verified}/${vr.nodes_verified + vr.nodes_failed} contracts verified by Z3`);
+            }
+
+            if (result.bugsFound.length > 0) {
+              console.log(`\nBugs caught:   ${result.bugsFound.length}`);
+              for (const bug of result.bugsFound) {
+                const sev = bug.severity === "critical" ? "CRITICAL" : bug.severity === "high" ? "HIGH" : bug.severity.toUpperCase();
+                console.log(`  ⚠ ${sev}: ${bug.description}`);
+                console.log(`    → In production: ${bug.wouldCauseInProduction}`);
+                console.log(`    → Caught by: ${bug.caughtBy}`);
+              }
+            } else {
+              console.log(`\nBugs caught:   0 (clean generation)`);
+            }
+
+            if (result.graph) {
+              const slug = description.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "").slice(0, 50);
+              mkdirSync("generated", { recursive: true });
+              if (aiFormat === "aether") {
+                const aetherSource = result.aetherSource || bridgeIrToAether(result.graph);
+                const outPath = `generated/${slug}.aether`;
+                writeAi(outPath, aetherSource, "utf-8");
+                console.log(`\nSaved: ${outPath}`);
+              } else {
+                const outPath = `generated/${slug}.json`;
+                writeAi(outPath, JSON.stringify(result.graph, null, 2), "utf-8");
+                console.log(`\nSaved: ${outPath}`);
+              }
+            }
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error(msg);
+            process.exit(1);
+          }
+
+          console.log(sep);
+          break;
+        }
+
+        case "ai-test": {
+          const { generateFromDescription } = await import("./ai/generate.js");
+          const { scenarios } = await import("./ai/scenarios.js");
+          const { generateBugReport, formatReport } = await import("./ai/report.js");
+          const { GenerationResult } = await import("./ai/generate.js") as any;
+
+          const scenariosIdx = args.indexOf("--scenarios");
+          const scenarioFilter = scenariosIdx >= 0 ? args[scenariosIdx + 1] : "all";
+          const showReport = args.includes("--report");
+
+          const toRun = scenarioFilter === "all"
+            ? scenarios
+            : scenarios.filter(s => s.id === scenarioFilter);
+
+          if (toRun.length === 0) {
+            console.error(`No scenarios match "${scenarioFilter}". Available: ${scenarios.map(s => s.id).join(", ")}`);
+            process.exit(1);
+          }
+
+          console.log(`Running ${toRun.length} scenario(s)...\n`);
+
+          const results = new Map<string, any>();
+          const scenarioMeta = new Map<string, { description: string; expectedBugs: string[]; explanation: string }>();
+
+          for (const scenario of toRun) {
+            console.log(`  ${scenario.id}...`);
+            scenarioMeta.set(scenario.id, {
+              description: scenario.description,
+              expectedBugs: scenario.expectedBugTypes,
+              explanation: scenario.explanation,
+            });
+            try {
+              const result = await generateFromDescription({
+                description: scenario.description,
+                maxAttempts: 2,
+              });
+              results.set(scenario.id, result);
+              const bugCount = result.bugsFound.length;
+              const mark = bugCount > 0 ? "✓" : "✗";
+              console.log(`  ${mark} ${scenario.id}: ${bugCount} bug(s) found`);
+            } catch (e) {
+              console.log(`  ✗ ${scenario.id}: error — ${e instanceof Error ? e.message : String(e)}`);
+              results.set(scenario.id, { success: false, graph: null, attempts: [], bugsFound: [], finalValidation: null, finalVerification: null });
+            }
+          }
+
+          const report = generateBugReport(results, scenarioMeta);
+
+          if (showReport) {
+            console.log("\n" + formatReport(report));
+          } else {
+            console.log(`\nDetection rate: ${(report.detectionRate * 100).toFixed(1)}% (${report.details.filter(d => d.caught).length}/${report.totalScenarios})`);
+            console.log(`Total bugs found: ${report.bugsDetected}`);
+          }
+          break;
+        }
+
+        case "run-pipeline": {
+          await cmdRunPipeline(cliFilePath, args);
+          break;
+        }
+
+        case "serve": {
+          const { startServer } = await import("./server/index.js");
+
+          const portIdx = args.indexOf("--port");
+          const port = portIdx >= 0 && args[portIdx + 1] ? parseInt(args[portIdx + 1], 10) : 3000;
+          const fsIdx = args.indexOf("--fs-path");
+          const fsPath = fsIdx >= 0 && args[fsIdx + 1] ? args[fsIdx + 1] : undefined;
+          const dbIdx = args.indexOf("--db-path");
+          const dbPath = dbIdx >= 0 && args[dbIdx + 1] ? args[dbIdx + 1] : undefined;
+          const modeIdx = args.indexOf("--mode");
+          const mode = (modeIdx >= 0 && args[modeIdx + 1] ? args[modeIdx + 1] : "mock") as "mock" | "real";
+          const autoOpen = args.includes("--open");
+
+          await startServer({
+            port,
+            graphPath: cliFilePath || undefined,
+            fsPath,
+            dbPath,
+            mode,
+            open: autoOpen,
+          });
           break;
         }
 

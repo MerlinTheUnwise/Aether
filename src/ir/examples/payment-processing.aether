@@ -1,0 +1,82 @@
+// Payment processing pipeline with temporal state transitions and complex recovery chains
+//
+
+graph payment_processing v1
+  effects: [payment_gateway.write, database.write, email]
+
+  metadata:
+    description: "Payment processing pipeline with temporal state transitions and complex recovery chains"
+    safety_level: high
+
+  // ─── Nodes ───
+
+  node validate_payment
+    in:  amount: Float64 @USD @range(0.01, 999999.99), card_token: String @uuid @internal, merchant_id: String @commerce
+    out: validated_amount: Float64 @USD, payment_id: String @uuid @payment, status: String @payment
+    contracts:
+      pre:  amount > 0
+      pre:  card_token.length > 0
+      post: validated_amount == amount
+      post: status == created
+    pure
+    confidence: 0.99
+  end
+
+  node authorize_card
+    in:  payment_id: String @uuid @payment, validated_amount: Float64 @USD, card_token: String @uuid @internal
+    out: authorization_code: String @payment, authorized_amount: Float64 @USD, status: String @payment
+    effects: [payment_gateway.write]
+    contracts:
+      pre:  validated_amount > 0
+      post: authorized_amount == validated_amount
+      post: status == authorized
+      post: authorization_code.length > 0
+      inv:  status != captured
+    recovery:
+      gateway_timeout -> retry(exponential)
+      insufficient_funds -> respond(402, "insufficient funds")
+      gateway_error -> escalate("payment gateway error")
+    adversarial:
+      break_if: authorized_amount != validated_amount
+      break_if: status == captured
+    confidence: 0.8
+  end
+
+  node capture_funds
+    in:  authorization_code: String @payment, authorized_amount: Float64 @USD, payment_id: String @uuid @payment
+    out: capture_id: String @payment, captured_amount: Float64 @USD, status: String @payment
+    effects: [payment_gateway.write, database.write]
+    contracts:
+      pre:  authorization_code.length > 0
+      pre:  authorized_amount > 0
+      post: captured_amount == authorized_amount
+      post: status == captured
+      inv:  captured_amount <= authorized_amount
+    recovery:
+      capture_timeout -> retry(exponential)
+      capture_failed -> fallback(node: queue_for_retry)
+      critical_error -> escalate("fund capture failed after retries")
+  end
+
+  node send_receipt
+    in:  payment_id: String @uuid @payment, captured_amount: Float64 @USD, capture_id: String @payment
+    out: receipt_sent: Bool
+    effects: [email]
+    contracts:
+      post: receipt_sent == true
+    recovery:
+      email_failed -> report(channel: ops-alerts)
+  end
+
+  // ─── Edges ───
+
+  edge validate_payment.payment_id -> authorize_card.payment_id
+  edge validate_payment.validated_amount -> authorize_card.validated_amount
+  edge authorize_card.authorization_code -> capture_funds.authorization_code
+  edge authorize_card.authorized_amount -> capture_funds.authorized_amount
+  edge validate_payment.payment_id -> capture_funds.payment_id
+  edge validate_payment.payment_id -> send_receipt.payment_id
+  edge capture_funds.captured_amount -> send_receipt.captured_amount
+  edge capture_funds.capture_id -> send_receipt.capture_id
+
+end // graph

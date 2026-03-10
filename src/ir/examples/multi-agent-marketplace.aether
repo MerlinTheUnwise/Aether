@@ -1,0 +1,215 @@
+// Multi-agent marketplace: 4 scopes (seller, buyer, payment, logistics) with complex boundary contracts
+//
+
+graph multi_agent_marketplace v1
+  effects: [database.read, database.write, payment_gateway.write, shipping.write, email, analytics.write, notification]
+
+  metadata:
+    description: "Multi-agent marketplace: 4 scopes (seller, buyer, payment, logistics) with complex boundary contracts"
+    safety_level: high
+    human_oversight: "confidence < 0.85"
+
+  scope seller
+    nodes: [list_product, verify_seller, calculate_fees]
+    provides:
+      listing_data: () -> (listing_id: String, listing_price: Float64 @USD)
+      fee_data: () -> (platform_fee: Float64 @USD, seller_payout: Float64 @USD)
+  end
+
+  scope buyer
+    nodes: [browse_catalog, place_order, buyer_review]
+    requires:
+      listing_data: (listing_id: String, listing_price: Float64 @USD) -> ()
+    provides:
+      order_data: () -> (order_id: String, order_total: Float64 @USD, buyer_satisfaction: Float64)
+  end
+
+  scope payment
+    nodes: [process_marketplace_payment, escrow_hold, refund_check]
+    requires:
+      order_data: (order_id: String, order_total: Float64 @USD) -> ()
+      fee_data: (platform_fee: Float64 @USD, seller_payout: Float64 @USD) -> ()
+      order_data: (buyer_satisfaction: Float64) -> ()
+    provides:
+      payment_result: () -> (transaction_id: String @payment, final_payment_status: String @payment)
+  end
+
+  scope logistics
+    nodes: [create_shipment, delivery_tracking, notify_parties]
+    requires:
+      order_data: (order_id: String) -> ()
+      listing_data: (listing_id: String) -> ()
+      payment_result: (transaction_id: String @payment, final_payment_status: String @payment) -> ()
+  end
+
+  // ─── Nodes ───
+
+  node list_product
+    in:  seller_id: String @pii, product_data: Map<String,String>
+    out: listing_id: String, listing_price: Float64 @USD
+    effects: [database.write]
+    contracts:
+      pre:  product_data.length > 0
+      post: listing_id.length > 0
+      post: listing_price > 0
+    recovery:
+      db_error -> retry(exponential)
+  end
+
+  node verify_seller
+    in:  seller_id: String @pii
+    out: seller_verified: Bool, seller_rating: Float64
+    effects: [database.read]
+    contracts:
+      post: seller_verified == true
+    recovery:
+      verification_timeout -> retry
+    adversarial:
+      break_if: seller_rating < 0
+      break_if: seller_rating > 5
+    supervised: "Seller verification involves trust assessment — requires human review for new sellers" pending
+    confidence: 0.8
+  end
+
+  node calculate_fees
+    in:  listing_price: Float64 @USD, seller_rating: Float64
+    out: platform_fee: Float64 @USD, seller_payout: Float64 @USD
+    contracts:
+      pre:  listing_price > 0
+      post: platform_fee >= 0
+      post: seller_payout >= 0
+      post: platform_fee + seller_payout == listing_price
+    pure
+  end
+
+  node browse_catalog
+    in:  search_query: String
+    out: search_results: List<Listing>, result_count: Int, selected_listing: String
+    effects: [database.read]
+    contracts:
+      post: result_count >= 0
+    recovery:
+      search_error -> fallback(value: "[]")
+  end
+
+  node place_order
+    in:  listing_id: String, buyer_id: String @pii, listing_price: Float64 @USD
+    out: order_id: String, order_total: Float64 @USD
+    effects: [database.write]
+    contracts:
+      pre:  listing_id.length > 0
+      pre:  listing_price > 0
+      post: order_id.length > 0
+      post: order_total > 0
+    recovery:
+      order_failed -> respond(500, "order creation failed")
+  end
+
+  node buyer_review
+    in:  order_id: String, buyer_id: String @pii
+    out: review_submitted: Bool, buyer_satisfaction: Float64
+    effects: [database.write]
+    contracts:
+      post: review_submitted == true
+    recovery:
+      review_failed -> report(channel: review-failures)
+  end
+
+  node process_marketplace_payment
+    in:  order_id: String, order_total: Float64 @USD, platform_fee: Float64 @USD, seller_payout: Float64 @USD
+    out: transaction_id: String @payment, payment_status: String @payment
+    effects: [payment_gateway.write]
+    contracts:
+      pre:  order_total > 0
+      pre:  platform_fee >= 0
+      pre:  seller_payout >= 0
+      post: payment_status == completed
+      post: transaction_id.length > 0
+    recovery:
+      payment_declined -> respond(402, "payment failed")
+      gateway_timeout -> retry(exponential)
+  end
+
+  node escrow_hold
+    in:  transaction_id: String @payment, seller_payout: Float64 @USD
+    out: escrow_id: String @payment, escrow_status: String @payment
+    effects: [payment_gateway.write, database.write]
+    contracts:
+      pre:  transaction_id.length > 0
+      pre:  seller_payout >= 0
+      post: escrow_id.length > 0
+    recovery:
+      escrow_failed -> escalate("escrow creation failed")
+    adversarial:
+      break_if: seller_payout < 0
+      break_if: escrow_status == failed
+    confidence: 0.82
+  end
+
+  node refund_check
+    in:  escrow_id: String @payment, buyer_satisfaction: Float64
+    out: refund_eligible: Bool, final_payment_status: String @payment
+    contracts:
+      pre:  escrow_id.length > 0
+      post: final_payment_status.length > 0
+    pure
+  end
+
+  node create_shipment
+    in:  order_id: String, listing_id: String, transaction_id: String @payment
+    out: tracking_number: String, estimated_delivery: String
+    effects: [shipping.write, database.write]
+    contracts:
+      pre:  order_id.length > 0
+      pre:  transaction_id.length > 0
+      post: tracking_number.length > 0
+    recovery:
+      shipping_unavailable -> escalate("shipping service unavailable")
+  end
+
+  node delivery_tracking
+    in:  tracking_number: String, order_id: String
+    out: delivery_status: String, delivery_confirmed: Bool
+    effects: [database.read, notification]
+    contracts:
+      post: delivery_status.length > 0
+    recovery:
+      tracking_error -> retry(exponential)
+  end
+
+  node notify_parties
+    in:  order_id: String, delivery_status: String, final_payment_status: String @payment
+    out: notifications_sent: Bool
+    effects: [email, notification]
+    contracts:
+      post: notifications_sent == true
+    recovery:
+      notification_failed -> report(channel: notification-failures)
+  end
+
+  // ─── Edges ───
+
+  edge list_product.listing_id -> browse_catalog.search_query
+  edge list_product.listing_price -> calculate_fees.listing_price
+  edge verify_seller.seller_rating -> calculate_fees.seller_rating
+  edge browse_catalog.selected_listing -> place_order.listing_id
+  edge list_product.listing_price -> place_order.listing_price
+  edge place_order.order_id -> buyer_review.order_id
+  edge place_order.order_id -> process_marketplace_payment.order_id
+  edge place_order.order_total -> process_marketplace_payment.order_total
+  edge calculate_fees.platform_fee -> process_marketplace_payment.platform_fee
+  edge calculate_fees.seller_payout -> process_marketplace_payment.seller_payout
+  edge process_marketplace_payment.transaction_id -> escrow_hold.transaction_id
+  edge calculate_fees.seller_payout -> escrow_hold.seller_payout
+  edge escrow_hold.escrow_id -> refund_check.escrow_id
+  edge buyer_review.buyer_satisfaction -> refund_check.buyer_satisfaction
+  edge place_order.order_id -> create_shipment.order_id
+  edge list_product.listing_id -> create_shipment.listing_id
+  edge process_marketplace_payment.transaction_id -> create_shipment.transaction_id
+  edge create_shipment.tracking_number -> delivery_tracking.tracking_number
+  edge place_order.order_id -> delivery_tracking.order_id
+  edge place_order.order_id -> notify_parties.order_id
+  edge delivery_tracking.delivery_status -> notify_parties.delivery_status
+  edge refund_check.final_payment_status -> notify_parties.final_payment_status
+
+end // graph

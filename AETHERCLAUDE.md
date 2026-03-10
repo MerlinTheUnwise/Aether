@@ -39,9 +39,15 @@ aether/
 │   ├── patterns.md                    # 14 complete IR examples (copy and adapt)
 │   ├── cli-reference.md              # All 32 CLI commands with flags
 │   ├── collaboration.md              # Scopes, boundary contracts, multi-agent (single-process)
-│   └── native-compilation.md         # LLVM backend (experimental), C runtime, benchmarking
+│   ├── native-compilation.md         # LLVM backend (experimental), C runtime, benchmarking
+│   └── syntax-reference.md          # Complete .aether syntax reference
 ├── prompts/
-│   └── generate-ir.md                # System prompt for AI IR generation
+│   ├── generate-ir.md                # System prompt for AI IR generation (JSON)
+│   └── generate-aether.md           # System prompt for AI .aether generation
+├── editor-support/                    # VS Code extension for .aether syntax highlighting
+│   ├── aether.tmLanguage.json        # TextMate grammar
+│   ├── language-configuration.json   # Bracket matching, folding, comments
+│   └── package.json                  # VS Code extension manifest
 ├── spec/                              # Formal language specifications
 │   ├── type-system.md
 │   ├── contracts.md
@@ -52,7 +58,7 @@ aether/
 │   ├── ir/
 │   │   ├── schema.json               # AETHER-IR JSON Schema (source of truth)
 │   │   ├── validator.ts              # Validator + scope/state/template rules
-│   │   └── examples/                 # 16 reference programs
+│   │   └── examples/                 # 17 reference programs (.json + .aether)
 │   ├── compiler/
 │   │   ├── checker.ts                # Semantic type checker (6 dimensions)
 │   │   ├── verifier.ts              # Z3 contract verification (WASM)
@@ -112,17 +118,19 @@ aether/
 
 ## Development Rules
 
-### When Generating AETHER-IR
-1. Read `docs/ir-reference.md` for the full schema
-2. Read `docs/patterns.md` for copy-and-adapt examples
-3. Read `prompts/generate-ir.md` for the generation system prompt
-4. Generate valid JSON conforming to `src/ir/schema.json`
-5. Validate with: `npx tsx src/cli.ts generate <path>`
-6. Fix any errors — every error message tells you exactly what to fix
-7. Re-validate until STATUS: ACCEPTED
+### When Generating AETHER Programs
+1. **Default format: `.aether`** — generate `.aether` syntax, not JSON
+2. Read `docs/syntax-reference.md` for the complete `.aether` syntax
+3. Read `docs/patterns.md` for copy-and-adapt examples
+4. Read `prompts/generate-aether.md` for the AI generation prompt (`.aether` format)
+5. Read `prompts/generate-ir.md` for legacy JSON generation prompt
+6. Validate with: `npx tsx src/cli.ts parse <path.aether>`
+7. Fix any errors — parser errors include line numbers and suggestions
+8. For AI generation: `npx tsx src/cli.ts ai "description" --format aether`
+9. JSON is the IR that tools pass around internally — humans write `.aether`
 
 ### When Modifying the Toolchain
-- Run `npm test` before and after changes (1836 tests must pass)
+- Run `npm test` before and after changes (2250 tests must pass)
 - Run `npm run typecheck` (zero errors required)
 - The IR schema (`src/ir/schema.json`) is the source of truth — all tools read it
 - `additionalProperties: false` on all schema objects — no extra fields

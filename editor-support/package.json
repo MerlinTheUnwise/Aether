@@ -1,0 +1,21 @@
+{
+  "name": "aether-language",
+  "displayName": "AETHER Language",
+  "description": "Syntax highlighting for .aether files",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [{
+      "id": "aether",
+      "aliases": ["AETHER"],
+      "extensions": [".aether"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "aether",
+      "scopeName": "source.aether",
+      "path": "./aether.tmLanguage.json"
+    }]
+  }
+}

@@ -1,0 +1,106 @@
+// Order processing pipeline with context-scoped subgraphs and boundary contracts
+//
+
+graph multi_scope_order v1
+  effects: [database.read, database.write, payment_gateway.write, shipping.write, email]
+
+  metadata:
+    description: "Order processing pipeline with context-scoped subgraphs and boundary contracts"
+
+  scope order
+    nodes: [validate_order, check_inventory]
+    provides:
+      order_data: () -> (total_amount: Float64 @USD, available: Bool, reserved_items: List<OrderItem>)
+  end
+
+  scope payment
+    nodes: [process_payment]
+    requires:
+      order_data: (total_amount: Float64 @USD, available: Bool) -> ()
+    provides:
+      payment_result: () -> (transaction_id: String @payment)
+  end
+
+  scope fulfillment
+    nodes: [create_shipment]
+    requires:
+      order_data: (reserved_items: List<OrderItem>) -> ()
+      payment_result: (transaction_id: String @payment) -> ()
+    provides:
+      shipment_result: () -> (tracking_number: String)
+  end
+
+  scope notification
+    nodes: [send_confirmation]
+    requires:
+      payment_result: (transaction_id: String @payment) -> ()
+      shipment_result: (tracking_number: String) -> ()
+  end
+
+  // ─── Nodes ───
+
+  node validate_order
+    in:  order_items: List<OrderItem>, customer_id: String @pii
+    out: validated_order: Order, total_amount: Float64 @USD
+    contracts:
+      post: total_amount > 0
+    pure
+  end
+
+  node check_inventory
+    in:  validated_order: Order
+    out: available: Bool, reserved_items: List<OrderItem>
+    effects: [database.read, database.write]
+    contracts:
+      post: available == true
+    recovery:
+      out_of_stock -> respond(409, "items out of stock")
+      db_timeout -> retry(exponential)
+  end
+
+  node process_payment
+    in:  total_amount: Float64 @USD, customer_id: String @pii, available: Bool @constraint("== true")
+    out: transaction_id: String @payment, payment_status: String @payment
+    effects: [payment_gateway.write]
+    contracts:
+      pre:  total_amount > 0
+      pre:  available == true
+      post: payment_status == completed
+      post: transaction_id.length > 0
+    recovery:
+      payment_declined -> respond(402, "payment declined")
+      gateway_error -> retry(exponential)
+  end
+
+  node create_shipment
+    in:  reserved_items: List<OrderItem>, customer_id: String @pii, transaction_id: String @payment
+    out: tracking_number: String, estimated_delivery: String
+    effects: [shipping.write, database.write]
+    contracts:
+      pre:  transaction_id.length > 0
+      post: tracking_number.length > 0
+    recovery:
+      shipping_unavailable -> escalate("shipping service unavailable")
+  end
+
+  node send_confirmation
+    in:  customer_id: String @pii, transaction_id: String @payment, tracking_number: String
+    out: notification_sent: Bool
+    effects: [email]
+    contracts:
+      post: notification_sent == true
+    recovery:
+      email_failed -> report(channel: notification-failures)
+  end
+
+  // ─── Edges ───
+
+  edge validate_order.validated_order -> check_inventory.validated_order
+  edge validate_order.total_amount -> process_payment.total_amount
+  edge check_inventory.available -> process_payment.available
+  edge check_inventory.reserved_items -> create_shipment.reserved_items
+  edge process_payment.transaction_id -> create_shipment.transaction_id
+  edge process_payment.transaction_id -> send_confirmation.transaction_id
+  edge create_shipment.tracking_number -> send_confirmation.tracking_number
+
+end // graph
