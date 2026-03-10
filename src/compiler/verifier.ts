@@ -2,6 +2,12 @@
  * AETHER Contract Verification Engine
  * Uses Z3 SMT solver (WASM) to verify node contracts.
  *
+ * Phase 6 Session 2: Rewritten to use the runtime evaluator's parser (via verifier-ast.ts)
+ * so the Z3 verifier and runtime evaluator parse expressions identically.
+ *
+ * Supports: quantifiers (∀, ∃), set operations (∈, ∉, ∩, ⊆), property predicates
+ * (list.distinct, list.is_sorted, list.length), bounded array theory, solver timeouts.
+ *
  * Postconditions: assert NOT(post) — UNSAT means postcondition always holds.
  * Adversarial checks: assert break_if — UNSAT means bad condition cannot occur.
  */
@@ -9,6 +15,7 @@
 import { readFileSync } from "fs";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
+import { translateExpression, Z3TranslationResult } from "./verifier-ast.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -55,14 +62,16 @@ interface AetherGraph {
 
 export interface PostconditionResult {
   expression: string;
-  status: "verified" | "failed" | "unsupported";
+  status: "verified" | "failed" | "timeout" | "unsupported";
   counterexample?: Record<string, string>;
+  z3_time_ms?: number;
 }
 
 export interface AdversarialResult {
   expression: string;
-  status: "passed" | "failed" | "unsupported";
+  status: "passed" | "failed" | "timeout" | "unsupported";
   counterexample?: Record<string, string>;
+  z3_time_ms?: number;
 }
 
 export interface VerificationResult {
@@ -70,6 +79,27 @@ export interface VerificationResult {
   verified: boolean;
   postconditions: PostconditionResult[];
   adversarial_checks: AdversarialResult[];
+}
+
+export interface VerificationCoverage {
+  z3_verified: number;
+  z3_failed: number;
+  z3_timeout: number;
+  z3_unsupported: number;
+  runtime_evaluable: number;
+  total_uncovered: number;
+}
+
+export interface EnhancedVerificationResult {
+  node_id: string;
+  contracts: Array<{
+    expression: string;
+    z3_status: "verified" | "failed" | "timeout" | "unsupported";
+    runtime_evaluable: boolean;
+    counterexample?: Record<string, string>;
+    z3_time_ms?: number;
+  }>;
+  coverage: VerificationCoverage;
 }
 
 export interface StateTypeVerificationResult {
@@ -88,6 +118,8 @@ export interface GraphVerificationReport {
   results: VerificationResult[];
   verification_percentage: number;
   stateTypeResults: StateTypeVerificationResult[];
+  coverage?: VerificationCoverage;
+  enhanced?: EnhancedVerificationResult[];
 }
 
 // ─── Z3 Initialization ───────────────────────────────────────────────────────
@@ -109,425 +141,38 @@ async function getZ3(): Promise<Z3Instance> {
 
 export { getZ3 };
 
-// ─── Expression Parser ────────────────────────────────────────────────────────
+// ─── Solver Timeout ──────────────────────────────────────────────────────────
 
-type ParsedExpr =
-  | { kind: "var"; name: string }
-  | { kind: "num"; value: number }
-  | { kind: "bool"; value: boolean }
-  | { kind: "str"; value: string }
-  | { kind: "compare"; op: string; left: ParsedExpr; right: ParsedExpr }
-  | { kind: "logic"; op: "and" | "or"; left: ParsedExpr; right: ParsedExpr }
-  | { kind: "implies"; left: ParsedExpr; right: ParsedExpr }
-  | { kind: "not"; expr: ParsedExpr }
-  | { kind: "prop"; object: string; property: string }
-  | { kind: "unsupported"; raw: string };
+/** Default Z3 solver timeout in milliseconds */
+const Z3_TIMEOUT_MS = 5000;
 
-function tokenize(expr: string): string[] {
-  const tokens: string[] = [];
-  let i = 0;
-  while (i < expr.length) {
-    // Skip whitespace
-    if (/\s/.test(expr[i])) { i++; continue; }
-
-    // Multi-char operators
-    if (expr.slice(i, i + 2) === "!=") { tokens.push("!="); i += 2; continue; }
-    if (expr.slice(i, i + 2) === ">=") { tokens.push(">="); i += 2; continue; }
-    if (expr.slice(i, i + 2) === "<=") { tokens.push("<="); i += 2; continue; }
-    if (expr.slice(i, i + 2) === "==") { tokens.push("=="); i += 2; continue; }
-    if (expr.slice(i, i + 2) === "&&") { tokens.push("&&"); i += 2; continue; }
-    if (expr.slice(i, i + 2) === "||") { tokens.push("||"); i += 2; continue; }
-    if (expr.slice(i, i + 2) === "->") { tokens.push("→"); i += 2; continue; }
-
-    // Unicode operators
-    if (expr[i] === "∧") { tokens.push("∧"); i++; continue; }
-    if (expr[i] === "∨") { tokens.push("∨"); i++; continue; }
-    if (expr[i] === "¬") { tokens.push("¬"); i++; continue; }
-    if (expr[i] === "≠") { tokens.push("≠"); i++; continue; }
-    if (expr[i] === "≤") { tokens.push("≤"); i++; continue; }
-    if (expr[i] === "≥") { tokens.push("≥"); i++; continue; }
-    if (expr[i] === "∈") { tokens.push("∈"); i++; continue; }
-    if (expr[i] === "∉") { tokens.push("∉"); i++; continue; }
-    if (expr[i] === "∩") { tokens.push("∩"); i++; continue; }
-    if (expr[i] === "⊆") { tokens.push("⊆"); i++; continue; }
-    if (expr[i] === "∀") { tokens.push("∀"); i++; continue; }
-    if (expr[i] === "→") { tokens.push("→"); i++; continue; }
-    if (expr[i] === "⟹") { tokens.push("→"); i++; continue; }
-
-    // Single-char operators
-    if ("<>=!+*()-:,".includes(expr[i])) { tokens.push(expr[i]); i++; continue; }
-
-    // String literals
-    if (expr[i] === '"') {
-      let str = '"';
-      i++;
-      while (i < expr.length && expr[i] !== '"') { str += expr[i]; i++; }
-      if (i < expr.length) { str += '"'; i++; }
-      tokens.push(str);
-      continue;
-    }
-
-    // Numbers
-    if (/\d/.test(expr[i]) || (expr[i] === "-" && i + 1 < expr.length && /\d/.test(expr[i + 1]))) {
-      let num = "";
-      if (expr[i] === "-") { num = "-"; i++; }
-      while (i < expr.length && /[\d.]/.test(expr[i])) { num += expr[i]; i++; }
-      tokens.push(num);
-      continue;
-    }
-
-    // Identifiers (including dotted property access)
-    if (/[a-zA-Z_]/.test(expr[i])) {
-      let ident = "";
-      while (i < expr.length && /[a-zA-Z0-9_.]/.test(expr[i])) { ident += expr[i]; i++; }
-      tokens.push(ident);
-      continue;
-    }
-
-    // Skip unknown characters
-    i++;
-  }
-  return tokens;
-}
-
-function parseExpression(expr: string): ParsedExpr {
-  const trimmed = expr.trim();
-
-  // Detect unsupported patterns early
-  if (trimmed.includes("∀") || trimmed.includes("forall")) {
-    return { kind: "unsupported", raw: trimmed };
-  }
-  if (trimmed.includes("∩") || trimmed.includes("intersection")) {
-    return { kind: "unsupported", raw: trimmed };
-  }
-  if (trimmed.includes("⊆") || trimmed.includes("is_subset_of")) {
-    return { kind: "unsupported", raw: trimmed };
-  }
-  if (trimmed.includes("<=>") || trimmed.includes("exists(")) {
-    return { kind: "unsupported", raw: trimmed };
-  }
-  if (trimmed.includes("in [") || trimmed.includes("in allowed_actions")) {
-    return { kind: "unsupported", raw: trimmed };
-  }
-  if (trimmed.includes("modifies") || trimmed.includes("deletes") || trimmed.includes("never(")) {
-    return { kind: "unsupported", raw: trimmed };
-  }
-  if (trimmed.includes("not_in") || trimmed.includes("has_duplicates") || trimmed.includes("is_distinct")) {
-    return { kind: "unsupported", raw: trimmed };
-  }
-  if (trimmed.includes("size in ") || trimmed.includes("lambda") || trimmed.includes("=>")) {
-    // "size in 10..20" style constraints
-    if (trimmed.includes("size in ")) return { kind: "unsupported", raw: trimmed };
-  }
-
-  const tokens = tokenize(trimmed);
-  if (tokens.length === 0) return { kind: "unsupported", raw: trimmed };
-
+/**
+ * Run a Z3 solver check with a timeout.
+ * Returns "unsat", "sat", or "timeout".
+ */
+async function solverCheckWithTimeout(
+  solver: any,
+  timeoutMs: number = Z3_TIMEOUT_MS
+): Promise<"unsat" | "sat" | "timeout"> {
   try {
-    return parseImplication(tokens, { pos: 0 });
+    // Z3 WASM solver supports set("timeout", ms) on params
+    solver.set("timeout", timeoutMs);
   } catch {
-    return { kind: "unsupported", raw: trimmed };
+    // Some Z3 versions don't support timeout on solver directly — proceed without
+  }
+  try {
+    const result = await Promise.race([
+      solver.check(),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), timeoutMs + 500)),
+    ]);
+    if (result === "unsat" || result === "sat") return result;
+    return "timeout";
+  } catch {
+    return "timeout";
   }
 }
 
-interface ParseState { pos: number }
-
-function parseImplication(tokens: string[], state: ParseState): ParsedExpr {
-  let left = parseOr(tokens, state);
-  while (state.pos < tokens.length && tokens[state.pos] === "→") {
-    state.pos++;
-    const right = parseOr(tokens, state);
-    left = { kind: "implies", left, right };
-  }
-  return left;
-}
-
-function parseOr(tokens: string[], state: ParseState): ParsedExpr {
-  let left = parseAnd(tokens, state);
-  while (state.pos < tokens.length && (tokens[state.pos] === "||" || tokens[state.pos] === "∨")) {
-    state.pos++;
-    const right = parseAnd(tokens, state);
-    left = { kind: "logic", op: "or", left, right };
-  }
-  return left;
-}
-
-function parseAnd(tokens: string[], state: ParseState): ParsedExpr {
-  let left = parseNot(tokens, state);
-  while (state.pos < tokens.length && (tokens[state.pos] === "&&" || tokens[state.pos] === "∧")) {
-    state.pos++;
-    const right = parseNot(tokens, state);
-    left = { kind: "logic", op: "and", left, right };
-  }
-  return left;
-}
-
-function parseNot(tokens: string[], state: ParseState): ParsedExpr {
-  if (state.pos < tokens.length && (tokens[state.pos] === "!" || tokens[state.pos] === "¬")) {
-    state.pos++;
-    const expr = parseNot(tokens, state);
-    return { kind: "not", expr };
-  }
-  return parseComparison(tokens, state);
-}
-
-function parseComparison(tokens: string[], state: ParseState): ParsedExpr {
-  const left = parseAtom(tokens, state);
-  const compOps = ["<", ">", "<=", ">=", "==", "!=", "≠", "≤", "≥", "="];
-
-  if (state.pos < tokens.length && compOps.includes(tokens[state.pos])) {
-    const op1 = tokens[state.pos];
-    state.pos++;
-    const middle = parseAtom(tokens, state);
-    const normalizedOp1 = op1 === "≠" ? "!=" : op1 === "≤" ? "<=" : op1 === "≥" ? ">=" : op1;
-    const firstCmp: ParsedExpr = { kind: "compare", op: normalizedOp1, left, right: middle };
-
-    // Check for chained comparison: a ≤ b ≤ c → (a ≤ b) ∧ (b ≤ c)
-    if (state.pos < tokens.length && compOps.includes(tokens[state.pos])) {
-      const op2 = tokens[state.pos];
-      state.pos++;
-      const right = parseAtom(tokens, state);
-      const normalizedOp2 = op2 === "≠" ? "!=" : op2 === "≤" ? "<=" : op2 === "≥" ? ">=" : op2;
-      const secondCmp: ParsedExpr = { kind: "compare", op: normalizedOp2, left: middle, right };
-      return { kind: "logic", op: "and", left: firstCmp, right: secondCmp };
-    }
-
-    return firstCmp;
-  }
-  return left;
-}
-
-function parseAtom(tokens: string[], state: ParseState): ParsedExpr {
-  if (state.pos >= tokens.length) {
-    throw new Error("Unexpected end of expression");
-  }
-
-  const token = tokens[state.pos];
-
-  // Parenthesized expression
-  if (token === "(") {
-    state.pos++;
-    const expr = parseOr(tokens, state);
-    if (state.pos < tokens.length && tokens[state.pos] === ")") {
-      state.pos++;
-    }
-    return expr;
-  }
-
-  // Boolean literals
-  if (token === "true") { state.pos++; return { kind: "bool", value: true }; }
-  if (token === "false") { state.pos++; return { kind: "bool", value: false }; }
-
-  // String literals
-  if (token.startsWith('"') && token.endsWith('"')) {
-    state.pos++;
-    return { kind: "str", value: token.slice(1, -1) };
-  }
-
-  // Number literals
-  if (/^-?\d+(\.\d+)?$/.test(token)) {
-    state.pos++;
-    return { kind: "num", value: parseFloat(token) };
-  }
-
-  // Identifiers (including dotted: "x.y" → prop)
-  if (/^[a-zA-Z_]/.test(token)) {
-    state.pos++;
-    if (token.includes(".")) {
-      const dot = token.indexOf(".");
-      return { kind: "prop", object: token.slice(0, dot), property: token.slice(dot + 1) };
-    }
-    return { kind: "var", name: token };
-  }
-
-  throw new Error(`Unexpected token: ${token}`);
-}
-
-// ─── Z3 Expression Builder ───────────────────────────────────────────────────
-
-function collectVariables(expr: ParsedExpr): Map<string, "int" | "real" | "bool" | "string" | "unknown"> {
-  const vars = new Map<string, "int" | "real" | "bool" | "string" | "unknown">();
-
-  function walk(e: ParsedExpr): void {
-    switch (e.kind) {
-      case "var":
-        if (!vars.has(e.name)) vars.set(e.name, "unknown");
-        break;
-      case "prop": {
-        const name = `${e.object}_${e.property}`;
-        // list.length → integer
-        if (e.property === "length") {
-          vars.set(name, "int");
-        } else if (!vars.has(name)) {
-          vars.set(name, "unknown");
-        }
-        break;
-      }
-      case "compare":
-        walk(e.left);
-        walk(e.right);
-        // Infer types from comparison context
-        inferFromComparison(e.left, e.right, vars);
-        // Infer string type from string comparisons
-        if (e.left.kind === "str" && e.right.kind === "var") vars.set(e.right.name, "unknown");
-        if (e.right.kind === "str" && e.left.kind === "var") vars.set(e.left.name, "unknown");
-        break;
-      case "logic":
-        walk(e.left);
-        walk(e.right);
-        break;
-      case "implies":
-        walk(e.left);
-        walk(e.right);
-        break;
-      case "not":
-        walk(e.expr);
-        break;
-    }
-  }
-
-  walk(expr);
-  return vars;
-}
-
-function inferFromComparison(
-  left: ParsedExpr,
-  right: ParsedExpr,
-  vars: Map<string, "int" | "real" | "bool" | "string" | "unknown">
-): void {
-  // If one side is a number, the other should be numeric
-  const leftName = left.kind === "var" ? left.name : left.kind === "prop" ? `${left.object}_${left.property}` : null;
-  const rightName = right.kind === "var" ? right.name : right.kind === "prop" ? `${right.object}_${right.property}` : null;
-
-  if (leftName && right.kind === "num") {
-    vars.set(leftName, Number.isInteger(right.value) ? "int" : "real");
-  }
-  if (rightName && left.kind === "num") {
-    vars.set(rightName, Number.isInteger(left.value) ? "int" : "real");
-  }
-  if (leftName && right.kind === "bool") {
-    vars.set(leftName, "bool");
-  }
-  if (rightName && left.kind === "bool") {
-    vars.set(rightName, "bool");
-  }
-  if (leftName && right.kind === "str") {
-    vars.set(leftName, "string");
-  }
-  if (rightName && left.kind === "str") {
-    vars.set(rightName, "string");
-  }
-}
-
-function buildZ3Expr(
-  expr: ParsedExpr,
-  ctx: Z3Context,
-  varMap: Map<string, unknown>
-): unknown | null {
-  switch (expr.kind) {
-    case "num": {
-      if (Number.isInteger(expr.value)) {
-        return ctx.Int.val(expr.value);
-      }
-      // Use Real for non-integers
-      return ctx.Real.val(expr.value);
-    }
-    case "bool":
-      return expr.value ? ctx.Bool.val(true) : ctx.Bool.val(false);
-    case "str":
-      // Create a string constant for Z3 comparison
-      try {
-        return ctx.String.val(expr.value);
-      } catch {
-        return null;
-      }
-    case "var": {
-      const v = varMap.get(expr.name);
-      if (!v) return null;
-      return v;
-    }
-    case "prop": {
-      const name = `${expr.object}_${expr.property}`;
-      const v = varMap.get(name);
-      if (!v) return null;
-      return v;
-    }
-    case "compare": {
-      const l = buildZ3Expr(expr.left, ctx, varMap);
-      const r = buildZ3Expr(expr.right, ctx, varMap);
-      if (!l || !r) return null;
-      try {
-        switch (expr.op) {
-          case "<": return ctx.LT(l, r);
-          case ">": return ctx.GT(l, r);
-          case "<=": return ctx.LE(l, r);
-          case ">=": return ctx.GE(l, r);
-          case "==":
-          case "=": return ctx.Eq(l, r);
-          case "!=": return ctx.Not(ctx.Eq(l, r));
-          default: return null;
-        }
-      } catch {
-        // Sort mismatch (e.g., Int vs String) — graceful degradation
-        return null;
-      }
-    }
-    case "logic": {
-      const l = buildZ3Expr(expr.left, ctx, varMap);
-      const r = buildZ3Expr(expr.right, ctx, varMap);
-      if (!l || !r) return null;
-      return expr.op === "and" ? ctx.And(l, r) : ctx.Or(l, r);
-    }
-    case "implies": {
-      const l = buildZ3Expr(expr.left, ctx, varMap);
-      const r = buildZ3Expr(expr.right, ctx, varMap);
-      if (!l || !r) return null;
-      return ctx.Implies(l, r);
-    }
-    case "not": {
-      const inner = buildZ3Expr(expr.expr, ctx, varMap);
-      if (!inner) return null;
-      return ctx.Not(inner);
-    }
-    case "unsupported":
-      return null;
-  }
-}
-
-function createZ3Variables(
-  vars: Map<string, "int" | "real" | "bool" | "string" | "unknown">,
-  nodeAnnotations: Map<string, TypeAnnotation>,
-  ctx: Z3Context
-): Map<string, unknown> {
-  const varMap = new Map<string, unknown>();
-
-  for (const [name, inferredType] of vars) {
-    // Check if there's a type annotation for this variable
-    const annotation = nodeAnnotations.get(name);
-    let type = inferredType;
-
-    if (annotation) {
-      if (annotation.type === "Int") type = "int";
-      else if (annotation.type === "Float64" || annotation.type === "Float32") type = "real";
-      else if (annotation.type === "Bool") type = "bool";
-      else if (annotation.type === "String") type = "string";
-    }
-
-    // Default unknown to int
-    if (type === "unknown") type = "int";
-
-    switch (type) {
-      case "int": varMap.set(name, ctx.Int.const(name)); break;
-      case "real": varMap.set(name, ctx.Real.const(name)); break;
-      case "bool": varMap.set(name, ctx.Bool.const(name)); break;
-      case "string":
-        try { varMap.set(name, ctx.String.const(name)); } catch { varMap.set(name, ctx.Int.const(name)); }
-        break;
-    }
-  }
-
-  return varMap;
-}
+// ─── Annotation Map ──────────────────────────────────────────────────────────
 
 function buildAnnotationMap(node: AetherNode): Map<string, TypeAnnotation> {
   const map = new Map<string, TypeAnnotation>();
@@ -540,12 +185,14 @@ function buildAnnotationMap(node: AetherNode): Map<string, TypeAnnotation> {
   return map;
 }
 
+// ─── Counterexample Extraction ───────────────────────────────────────────────
+
 function extractCounterexample(
   model: { eval: (v: unknown) => { toString: () => string } },
-  varMap: Map<string, unknown>
+  variables: Map<string, unknown>
 ): Record<string, string> {
   const ce: Record<string, string> = {};
-  for (const [name, z3Var] of varMap) {
+  for (const [name, z3Var] of variables) {
     try {
       ce[name] = model.eval(z3Var).toString();
     } catch {
@@ -555,7 +202,26 @@ function extractCounterexample(
   return ce;
 }
 
-// ─── Node Verification ───────────────────────────────────────────────────────
+// ─── Runtime Evaluability Check ──────────────────────────────────────────────
+
+/**
+ * Check if an expression can be evaluated by the runtime evaluator.
+ * We test-parse it using the same pipeline.
+ */
+function isRuntimeEvaluable(expression: string): boolean {
+  try {
+    const { tokenize } = _require("../runtime/evaluator/lexer.js") as { tokenize: (e: string) => any[] };
+    const { parse } = _require("../runtime/evaluator/parser.js") as { parse: (t: any[]) => { errors: any[] } };
+    const tokens = tokenize(expression);
+    const { errors } = parse(tokens);
+    return errors.length === 0;
+  } catch {
+    // If we can't import runtime evaluator, conservatively say no
+    return false;
+  }
+}
+
+// ─── Node Verification (rewritten with AST translator) ──────────────────────
 
 export async function verifyNode(
   node: AetherNode,
@@ -568,59 +234,67 @@ export async function verifyNode(
   const postconditions: PostconditionResult[] = [];
   const adversarial_checks: AdversarialResult[] = [];
 
+  // Shared variable maps across all expressions in this node
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sharedVars = new Map<string, any>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sharedArrays = new Map<string, { array: any; length: any }>();
+
   // Build precondition constraints (used as assumptions)
-  const preExprs: unknown[] = [];
+  const preResults: Z3TranslationResult[] = [];
   if (node.contract.pre) {
     for (const preStr of node.contract.pre) {
-      const parsed = parseExpression(preStr);
-      if (parsed.kind === "unsupported") continue;
-      const vars = collectVariables(parsed);
-      const varMap = createZ3Variables(vars, annotations, ctx);
-      const z3Expr = buildZ3Expr(parsed, ctx, varMap);
-      if (z3Expr) preExprs.push({ expr: z3Expr, varMap });
+      const result = translateExpression(preStr, ctx, annotations, sharedVars, sharedArrays);
+      sharedVars = result.variables;
+      sharedArrays = result.listArrays;
+      if (result.expr) {
+        preResults.push(result);
+      }
     }
   }
 
   // Verify postconditions
   if (node.contract.post) {
     for (const postStr of node.contract.post) {
-      const parsed = parseExpression(postStr);
-      if (parsed.kind === "unsupported") {
-        postconditions.push({ expression: postStr, status: "unsupported" });
-        continue;
-      }
+      const startTime = Date.now();
+      const result = translateExpression(postStr, ctx, annotations, sharedVars, sharedArrays);
+      sharedVars = result.variables;
+      sharedArrays = result.listArrays;
 
-      const vars = collectVariables(parsed);
-      const varMap = createZ3Variables(vars, annotations, ctx);
-      const z3Expr = buildZ3Expr(parsed, ctx, varMap);
-
-      if (!z3Expr) {
-        postconditions.push({ expression: postStr, status: "unsupported" });
+      if (!result.expr) {
+        postconditions.push({
+          expression: postStr,
+          status: "unsupported",
+          z3_time_ms: Date.now() - startTime,
+        });
         continue;
       }
 
       try {
         const solver = new ctx.Solver();
         // Add preconditions as assumptions
-        for (const pre of preExprs) {
-          // Merge var maps for shared variables
-          const preObj = pre as { expr: unknown; varMap: Map<string, unknown> };
-          solver.add(preObj.expr);
+        for (const pre of preResults) {
+          if (pre.expr) solver.add(pre.expr);
         }
         // Assert NOT(postcondition) — if UNSAT, postcondition always holds
-        solver.add(ctx.Not(z3Expr));
-        const result = await solver.check();
+        solver.add(ctx.Not(result.expr));
+        const check = await solverCheckWithTimeout(solver);
+        const elapsed = Date.now() - startTime;
 
-        if (result === "unsat") {
-          postconditions.push({ expression: postStr, status: "verified" });
+        if (check === "unsat") {
+          postconditions.push({ expression: postStr, status: "verified", z3_time_ms: elapsed });
+        } else if (check === "timeout") {
+          postconditions.push({ expression: postStr, status: "timeout", z3_time_ms: elapsed });
         } else {
-          const ce = result === "sat"
-            ? extractCounterexample(solver.model(), varMap)
-            : undefined;
-          postconditions.push({ expression: postStr, status: "failed", counterexample: ce });
+          const ce = extractCounterexample(solver.model(), result.variables);
+          postconditions.push({ expression: postStr, status: "failed", counterexample: ce, z3_time_ms: elapsed });
         }
       } catch {
-        postconditions.push({ expression: postStr, status: "unsupported" });
+        postconditions.push({
+          expression: postStr,
+          status: "unsupported",
+          z3_time_ms: Date.now() - startTime,
+        });
       }
     }
   }
@@ -628,60 +302,143 @@ export async function verifyNode(
   // Verify adversarial checks
   if (node.adversarial_check?.break_if) {
     for (const breakStr of node.adversarial_check.break_if) {
-      const parsed = parseExpression(breakStr);
-      if (parsed.kind === "unsupported") {
-        adversarial_checks.push({ expression: breakStr, status: "unsupported" });
-        continue;
-      }
+      const startTime = Date.now();
+      const result = translateExpression(breakStr, ctx, annotations, sharedVars, sharedArrays);
+      sharedVars = result.variables;
+      sharedArrays = result.listArrays;
 
-      const vars = collectVariables(parsed);
-      const varMap = createZ3Variables(vars, annotations, ctx);
-      const z3Expr = buildZ3Expr(parsed, ctx, varMap);
-
-      if (!z3Expr) {
-        adversarial_checks.push({ expression: breakStr, status: "unsupported" });
+      if (!result.expr) {
+        adversarial_checks.push({
+          expression: breakStr,
+          status: "unsupported",
+          z3_time_ms: Date.now() - startTime,
+        });
         continue;
       }
 
       try {
         const solver = new ctx.Solver();
-        // Add preconditions and postconditions as context
-        for (const pre of preExprs) {
-          const preObj = pre as { expr: unknown; varMap: Map<string, unknown> };
-          solver.add(preObj.expr);
+        // Add preconditions as context
+        for (const pre of preResults) {
+          if (pre.expr) solver.add(pre.expr);
         }
         // Assert the adversarial condition
         // If UNSAT → the bad thing can never happen → PASSED
         // If SAT → the bad thing could happen → FAILED
-        solver.add(z3Expr);
-        const result = await solver.check();
+        solver.add(result.expr);
+        const check = await solverCheckWithTimeout(solver);
+        const elapsed = Date.now() - startTime;
 
-        if (result === "unsat") {
-          adversarial_checks.push({ expression: breakStr, status: "passed" });
+        if (check === "unsat") {
+          adversarial_checks.push({ expression: breakStr, status: "passed", z3_time_ms: elapsed });
+        } else if (check === "timeout") {
+          adversarial_checks.push({ expression: breakStr, status: "timeout", z3_time_ms: elapsed });
         } else {
-          const ce = result === "sat"
-            ? extractCounterexample(solver.model(), varMap)
-            : undefined;
-          adversarial_checks.push({ expression: breakStr, status: "failed", counterexample: ce });
+          const ce = extractCounterexample(solver.model(), result.variables);
+          adversarial_checks.push({ expression: breakStr, status: "failed", counterexample: ce, z3_time_ms: elapsed });
         }
       } catch {
-        adversarial_checks.push({ expression: breakStr, status: "unsupported" });
+        adversarial_checks.push({
+          expression: breakStr,
+          status: "unsupported",
+          z3_time_ms: Date.now() - startTime,
+        });
       }
     }
   }
 
   // Node is verified if all postconditions verified and all adversarial checks passed
-  const allPostVerified = postconditions.every(p => p.status === "verified" || p.status === "unsupported");
-  const allAdversarialPassed = adversarial_checks.every(a => a.status === "passed" || a.status === "unsupported");
-  const hasAnyVerified = postconditions.some(p => p.status === "verified") || adversarial_checks.some(a => a.status === "passed");
   const hasAnyFailed = postconditions.some(p => p.status === "failed") || adversarial_checks.some(a => a.status === "failed");
+  const hasAnyVerified = postconditions.some(p => p.status === "verified") || adversarial_checks.some(a => a.status === "passed");
 
   return {
     node_id: node.id,
-    verified: !hasAnyFailed && (hasAnyVerified || (!hasAnyFailed)),
+    verified: !hasAnyFailed && (hasAnyVerified || !hasAnyFailed),
     postconditions,
     adversarial_checks,
   };
+}
+
+// ─── Enhanced Verification (with coverage) ───────────────────────────────────
+
+export function computeEnhancedResults(
+  results: VerificationResult[]
+): { enhanced: EnhancedVerificationResult[]; coverage: VerificationCoverage } {
+  const coverage: VerificationCoverage = {
+    z3_verified: 0,
+    z3_failed: 0,
+    z3_timeout: 0,
+    z3_unsupported: 0,
+    runtime_evaluable: 0,
+    total_uncovered: 0,
+  };
+
+  const enhanced: EnhancedVerificationResult[] = [];
+
+  for (const r of results) {
+    const nodeContracts: EnhancedVerificationResult["contracts"] = [];
+    const nodeCov: VerificationCoverage = {
+      z3_verified: 0,
+      z3_failed: 0,
+      z3_timeout: 0,
+      z3_unsupported: 0,
+      runtime_evaluable: 0,
+      total_uncovered: 0,
+    };
+
+    for (const p of r.postconditions) {
+      const runtimeEval = isRuntimeEvaluable(p.expression);
+      nodeContracts.push({
+        expression: p.expression,
+        z3_status: p.status,
+        runtime_evaluable: runtimeEval,
+        counterexample: p.counterexample,
+        z3_time_ms: p.z3_time_ms,
+      });
+
+      switch (p.status) {
+        case "verified": nodeCov.z3_verified++; coverage.z3_verified++; break;
+        case "failed": nodeCov.z3_failed++; coverage.z3_failed++; break;
+        case "timeout": nodeCov.z3_timeout++; coverage.z3_timeout++; break;
+        case "unsupported":
+          nodeCov.z3_unsupported++; coverage.z3_unsupported++;
+          if (runtimeEval) { nodeCov.runtime_evaluable++; coverage.runtime_evaluable++; }
+          else { nodeCov.total_uncovered++; coverage.total_uncovered++; }
+          break;
+      }
+    }
+
+    for (const a of r.adversarial_checks) {
+      const runtimeEval = isRuntimeEvaluable(a.expression);
+      const z3Status = a.status === "passed" ? "verified" as const : a.status;
+      nodeContracts.push({
+        expression: a.expression,
+        z3_status: z3Status,
+        runtime_evaluable: runtimeEval,
+        counterexample: a.counterexample,
+        z3_time_ms: a.z3_time_ms,
+      });
+
+      switch (a.status) {
+        case "passed": nodeCov.z3_verified++; coverage.z3_verified++; break;
+        case "failed": nodeCov.z3_failed++; coverage.z3_failed++; break;
+        case "timeout": nodeCov.z3_timeout++; coverage.z3_timeout++; break;
+        case "unsupported":
+          nodeCov.z3_unsupported++; coverage.z3_unsupported++;
+          if (runtimeEval) { nodeCov.runtime_evaluable++; coverage.runtime_evaluable++; }
+          else { nodeCov.total_uncovered++; coverage.total_uncovered++; }
+          break;
+      }
+    }
+
+    enhanced.push({
+      node_id: r.node_id,
+      contracts: nodeContracts,
+      coverage: nodeCov,
+    });
+  }
+
+  return { enhanced, coverage };
 }
 
 // ─── State Type Verification ─────────────────────────────────────────────────
@@ -743,7 +500,6 @@ async function verifyStateType(
 
       try {
         const solver = new ctx.Solver();
-        // Assert: valid transition AND from=nev.from AND to=nev.to
         solver.add(validTransition);
         solver.add(ctx.Eq(fromVar, ctx.Int.val(fromIdx)));
         solver.add(ctx.Eq(toVar, ctx.Int.val(toIdx)));
@@ -766,7 +522,6 @@ async function verifyStateType(
 
       try {
         const solver = new ctx.Solver();
-        // Assert: valid transition AND from=terminal_state
         solver.add(validTransition);
         solver.add(ctx.Eq(fromVar, ctx.Int.val(termIdx)));
         const check = await solver.check();
@@ -830,6 +585,9 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
     }
   }
 
+  // Compute coverage report
+  const { enhanced, coverage } = computeEnhancedResults(results);
+
   return {
     graph_id: graph.id,
     nodes_verified,
@@ -838,6 +596,8 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
     results,
     verification_percentage,
     stateTypeResults,
+    coverage,
+    enhanced,
   };
 }
 
@@ -866,21 +626,41 @@ if (isMain && process.argv.length >= 3) {
         console.log(`${icon}  Node: ${r.node_id}`);
 
         for (const p of r.postconditions) {
-          const statusIcon = p.status === "verified" ? "✓" : p.status === "failed" ? "✗" : "?";
-          console.log(`   ${statusIcon} POST: ${p.expression} → ${p.status}`);
+          const statusIcon = p.status === "verified" ? "✓" : p.status === "failed" ? "✗" : p.status === "timeout" ? "⏱" : "?";
+          console.log(`   ${statusIcon} POST: ${p.expression} → ${p.status}${p.z3_time_ms ? ` (${p.z3_time_ms}ms)` : ""}`);
           if (p.counterexample) {
             console.log(`     counterexample: ${JSON.stringify(p.counterexample)}`);
           }
         }
 
         for (const a of r.adversarial_checks) {
-          const statusIcon = a.status === "passed" ? "✓" : a.status === "failed" ? "✗" : "?";
-          console.log(`   ${statusIcon} BREAK_IF: ${a.expression} → ${a.status}`);
+          const statusIcon = a.status === "passed" ? "✓" : a.status === "failed" ? "✗" : a.status === "timeout" ? "⏱" : "?";
+          console.log(`   ${statusIcon} BREAK_IF: ${a.expression} → ${a.status}${a.z3_time_ms ? ` (${a.z3_time_ms}ms)` : ""}`);
           if (a.counterexample) {
             console.log(`     counterexample: ${JSON.stringify(a.counterexample)}`);
           }
         }
 
+        console.log();
+      }
+
+      // Print coverage report
+      if (report.coverage) {
+        const c = report.coverage;
+        const total = c.z3_verified + c.z3_failed + c.z3_timeout + c.z3_unsupported;
+        console.log(`═══ Verification Coverage ═══`);
+        console.log(`Z3 verified:     ${c.z3_verified}/${total}`);
+        console.log(`Z3 failed:       ${c.z3_failed}/${total}`);
+        console.log(`Z3 timeout:      ${c.z3_timeout}/${total}`);
+        console.log(`Z3 unsupported:  ${c.z3_unsupported}/${total}`);
+        if (c.z3_unsupported > 0) {
+          console.log(`  ├─ runtime evaluable: ${c.runtime_evaluable}`);
+          console.log(`  └─ truly uncovered:   ${c.total_uncovered}`);
+        }
+        if (total > 0) {
+          const unsupportedPct = Math.round((c.z3_unsupported / total) * 100);
+          console.log(`Unsupported rate: ${unsupportedPct}%`);
+        }
         console.log();
       }
 

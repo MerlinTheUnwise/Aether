@@ -1,17 +1,17 @@
 # AETHER Design Specification v0.2
 
 > **Axiomatic Execution Through Holistic Expression & Reasoning**
-> The first programming language designed for AI cognition.
+> An intermediate representation format designed for AI-generated safety-critical workflows.
 
 ---
 
 ## 1. The Manifesto
 
-Every programming language ever created was designed for human minds. AETHER is the first language designed for **AI minds** — and by removing the constraints of human cognition, it unlocks an entirely new paradigm of computation.
+Every programming language ever created was designed for human minds. AETHER is designed for **AI-generated programs** — and by removing the constraints of human-readable syntax, it enables a different approach to program construction and verification.
 
 Programs in AETHER are not lines of text. They are **computation graphs** — every node carrying its own proof, its own contract, its own confidence. There is no syntax to mistype, no bracket to mismatch, no semicolon to forget. There is only intent, structure, and truth.
 
-AETHER's nine pillars: graph-native, proof-carrying, intent-declarative, confidence-aware, effect-tracked, parallel-default, self-healing, incremental-verifiable, context-scoped.
+AETHER's nine pillars: graph-native, contract-verified, intent-declarative, confidence-aware, effect-tracked, parallel-default, self-healing, incremental-verifiable, context-scoped.
 
 ---
 
@@ -117,9 +117,9 @@ This eliminates entire categories of errors: no mismatched brackets, no indentat
 
 When AI generates AETHER, it's constructing a well-formed tree structure natively — the same kind of structure it already uses internally for reasoning. There's no "translation" step from thought to syntax.
 
-### Pillar 2: Proof-Carrying Code
+### Pillar 2: Contract-Verified Code
 
-Every function carries its own correctness proof.
+Every function carries contracts verified by Z3. Optional Lean 4 proof skeleton export.
 
 Every node in AETHER carries preconditions, postconditions, and invariants. These aren't comments or documentation — they're machine-verifiable contracts that the compiler/runtime enforces. The AI writes both the implementation and its proof simultaneously.
 
@@ -552,7 +552,7 @@ flow: fetch_raw → clean → aggregate → deliver
 
 ## 8. What AETHER Makes Possible
 
-**Zero-Bug-By-Construction Software.** Proof-carrying code means: if it compiles, it's correct. The AI writes both code and proof in the same act. "Testing" becomes "verification."
+**Contract-Verified Software.** Every node's contracts are verified by Z3. For the subset of contracts Z3 can prove, verification replaces testing. Complex contracts fall back to runtime checking.
 
 **Self-Optimizing Systems.** Intent separated from implementation means the runtime can transparently swap algorithms. Same AETHER program runs optimally on a Raspberry Pi and a data center.
 
@@ -602,10 +602,10 @@ flow: fetch_raw → clean → aggregate → deliver
 
 ### Phase 3 — Self-Improving Ecosystem
 
-- JIT compilation of hot subgraphs
-- AI-driven graph optimization suggestions
-- Community graph registry (verified computation graphs)
-- Formal verification export (Lean/Coq proof certificates)
+- Runtime code generation for hot subgraphs (compiles to optimized JavaScript)
+- Static graph optimization (11 rule-based analysis passes)
+- Local package registry with semver dependency resolution
+- Lean 4 proof skeleton export (requires manual completion for non-trivial contracts)
 - Cross-platform native compilation (LLVM backend)
 - Verification score dashboard for deployed systems
 

@@ -98,6 +98,32 @@ void aether_log_print(AetherExecutionLog* log);
 void aether_log_free(AetherExecutionLog* log);
 double aether_time_ms(void);
 
+/* ═══ Runtime Init/Finalize ═══ */
+void aether_runtime_init(double confidence_threshold, int contract_mode);
+void aether_runtime_finalize(void);
+
+/* ═══ String helpers ═══ */
+AetherString aether_string_from_cstr(const char* s);
+bool aether_string_contains(AetherString haystack, AetherString needle);
+
+/* ═══ List helpers ═══ */
+bool aether_list_is_sorted(AetherList* list, int (*cmp)(const void*, const void*));
+bool aether_list_has_duplicates(AetherList* list, bool (*eq)(const void*, const void*));
+
+/* ═══ Confidence helpers ═══ */
+void aether_confidence_init(double threshold);
+int aether_confidence_check(double value, double threshold);
+void aether_confidence_propagate_named(const char* node_id, double value);
+void aether_confidence_report(void);
+
+/* ═══ Effects helpers ═══ */
+void aether_effect_declare(const char* node_id, const char* effect);
+int aether_effect_check_violations(AetherEffectLog* log, const char** allowed, int64_t count);
+void aether_effect_report(AetherEffectLog* log);
+
+/* ═══ Arena helpers ═══ */
+void* aether_alloc(int64_t bytes);
+
 /* ═══ Thread Pool (Parallel Wave Execution) ═══ */
 typedef struct AetherThreadPool AetherThreadPool;
 typedef void (*AetherTaskFn)(void* arg, void* result);

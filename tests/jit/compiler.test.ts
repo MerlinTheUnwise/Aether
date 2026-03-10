@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { JITCompiler } from "../../src/runtime/jit.js";
+import { RuntimeCompiler } from "../../src/runtime/jit.js";
 import type { AetherGraph, AetherNode, TypeAnnotation } from "../../src/ir/validator.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,7 +41,7 @@ function makeGraph(nodes: AetherNode[], edges: { from: string; to: string }[] = 
   return { id: "test", version: 1, effects: [], nodes, edges };
 }
 
-describe("JITCompiler", () => {
+describe("RuntimeCompiler", () => {
   it("compiles simple 2-node chain into valid function", () => {
     const n1 = makeNode("a", {
       out: { x: { type: "String" } },
@@ -54,7 +54,7 @@ describe("JITCompiler", () => {
     });
     const graph = makeGraph([n1, n2], [{ from: "a.x", to: "b.x" }]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a", "b"]);
 
     expect(compiled.id).toMatch(/^compiled_/);
@@ -77,7 +77,7 @@ describe("JITCompiler", () => {
     });
     const graph = makeGraph([n1, n2], [{ from: "a.x", to: "b.x" }]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a", "b"]);
 
     // Execute with no implementations (stub mode)
@@ -107,7 +107,7 @@ describe("JITCompiler", () => {
     });
     const graph = makeGraph([n1, n2], [{ from: "a.doubled", to: "b.doubled" }]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a", "b"]);
 
     const impls = new Map<string, any>();
@@ -131,7 +131,7 @@ describe("JITCompiler", () => {
     });
     const graph = makeGraph([n1]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a"]);
 
     const result = await compiled.fn(
@@ -151,7 +151,7 @@ describe("JITCompiler", () => {
     });
     const graph = makeGraph([n1]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a"]);
 
     const effectLog: string[] = [];
@@ -178,7 +178,7 @@ describe("JITCompiler", () => {
     });
     const graph = makeGraph([n1]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a"]);
 
     let callCount = 0;
@@ -203,7 +203,7 @@ describe("JITCompiler", () => {
     const n1 = makeNode("a");
     const graph = makeGraph([n1]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const first = compiler.compile(graph, ["a"]);
     const second = compiler.compile(graph, ["a"]);
 
@@ -217,7 +217,7 @@ describe("JITCompiler", () => {
     const n1 = makeNode("a");
     const graph = makeGraph([n1]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     compiler.compile(graph, ["a"]);
     expect(compiler.getCached(["a"])).not.toBeNull();
 
@@ -229,7 +229,7 @@ describe("JITCompiler", () => {
     const graph = loadExample("user-registration");
     const nodeIds = (graph as any).nodes.map((n: any) => n.id);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, nodeIds);
 
     expect(compiled.source).toContain("validate_email");
@@ -243,7 +243,7 @@ describe("JITCompiler", () => {
     const graph = loadExample("user-registration");
     const nodeIds = (graph as any).nodes.map((n: any) => n.id);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, nodeIds);
 
     const result = await compiled.fn(

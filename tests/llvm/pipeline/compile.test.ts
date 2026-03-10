@@ -136,10 +136,10 @@ describe("Compilation Pipeline", () => {
     }
   });
 
-  it("pipeline with --target object → stops after llc (if available)", async () => {
+  it("pipeline with --target object → stops after llc/clang (if available)", async () => {
     const toolchain = await detectToolchain();
-    if (!toolchain.llc.available) {
-      // If llc not available, pipeline fails gracefully
+    if (!toolchain.llc.available && !toolchain.clang.available) {
+      // If neither llc nor clang available, pipeline fails gracefully
       const tmpDir = mkdtempSync(join(tmpdir(), "aether-pipeline-"));
       try {
         const result = await compileToBinary({
@@ -147,15 +147,16 @@ describe("Compilation Pipeline", () => {
           outputDir: tmpDir,
           target: "object",
         });
-        // Should fail because llc is missing, but IR should still be generated
+        // Should fail because no compiler is available, but IR should still be generated
         expect(result.stages.emitIR.success).toBe(true);
-        expect(result.errors.some(e => e.includes("llc"))).toBe(true);
+        expect(result.errors.some(e => e.includes("llc") || e.includes("clang"))).toBe(true);
       } finally {
         rmSync(tmpDir, { recursive: true, force: true });
       }
       return;
     }
 
+    // llc or clang is available — compilation should succeed
     const tmpDir = mkdtempSync(join(tmpdir(), "aether-pipeline-"));
     try {
       const result = await compileToBinary({

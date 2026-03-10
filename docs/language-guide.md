@@ -1,7 +1,7 @@
 # AETHER Language Guide
 
 > Axiomatic Execution Through Holistic Expression & Reasoning
-> The first programming language designed for AI cognition.
+> An intermediate representation format designed for AI-generated safety-critical workflows.
 
 ## What AETHER Is
 
@@ -18,8 +18,8 @@ Every design decision in AETHER traces back to one of these principles:
 ### 1. Graph-Native
 Programs are DAGs, not text files. No syntax errors possible — a program is structurally valid JSON or it isn't. No brackets to mismatch, no indentation bugs, no semicolons.
 
-### 2. Proof-Carrying
-Every node carries preconditions, postconditions, and invariants. These are machine-verifiable contracts checked by Z3. If a node compiles, its contracts are satisfied.
+### 2. Contract-Verified
+Every node carries preconditions, postconditions, and invariants. These are contracts verified by Z3 (arithmetic, boolean, comparisons, implication). Complex expressions fall back to runtime evaluation. Optional Lean 4 proof skeleton export is available for manual completion.
 
 ### 3. Intent-Declarative
 Layer 3 nodes declare WHAT should be true ("output must be sorted") without specifying HOW. The intent resolver matches these to certified algorithms with proven contracts.
@@ -86,8 +86,8 @@ Build new verified algorithms when needed. These join the certified library for 
 
 Three runtime modes from the same source:
 - **Interpreted** — Graph executor walks the DAG (development/debugging)
-- **JIT** — Hot subgraphs compiled to optimized JavaScript (Node.js production)
-- **Native** — Full graph compiled to machine code via LLVM (maximum performance)
+- **Compiled** — Hot subgraphs compiled to optimized JavaScript functions (Node.js production)
+- **Native** — LLVM IR generation with C runtime (experimental — end-to-end execution not yet verified)
 
 ## Key Terminology
 

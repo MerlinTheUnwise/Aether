@@ -50,6 +50,7 @@ export interface LLVMCodegenOptions {
   confidenceGating: boolean;    // default true
   executionLogging: boolean;    // default true
   arenaSize?: number;           // default: 1MB (1048576)
+  contractMode?: "abort" | "log" | "count";  // default: "abort"
 }
 
 const DEFAULT_CODEGEN_OPTIONS: LLVMCodegenOptions = {
@@ -57,6 +58,7 @@ const DEFAULT_CODEGEN_OPTIONS: LLVMCodegenOptions = {
   confidenceGating: true,
   executionLogging: true,
   arenaSize: 1048576,
+  contractMode: "abort",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -73,6 +75,20 @@ function safeId(id: string): string {
 
 function isAetherNode(n: AetherNode | { intent?: boolean; [key: string]: unknown }): n is AetherNode {
   return !("intent" in n && (n as any).intent === true) && !("hole" in n && (n as any).hole === true);
+}
+
+/**
+ * Returns true if the LLVM type represents a struct > 8 bytes.
+ * On MSVC x64 ABI, such types must be passed/returned via pointer (sret/byval).
+ */
+function isLargeStruct(llvmType: string): boolean {
+  if (llvmType.endsWith("*")) return false; // already a pointer
+  if (llvmType.startsWith("%") && !llvmType.includes("*")) {
+    // All named struct types in our codegen are > 8 bytes
+    // (AetherString=16, AetherList=32, etc.)
+    return true;
+  }
+  return false;
 }
 
 // ─── Contract → LLVM IR ───────────────────────────────────────────────────────
@@ -170,7 +186,15 @@ export function contractToLLVM(
     if (port) {
       const n = c();
       const result = `%prop_${n}`;
-      instructions.push(`  ${result} = call i1 @aether_string_${propName}(${port.llvmType} ${port.varName})`);
+      if (isLargeStruct(port.llvmType)) {
+        // MSVC ABI: pass struct via pointer
+        const tmpPtr = `%tmp_ptr_${n}`;
+        instructions.push(`  ${tmpPtr} = alloca ${port.llvmType}`);
+        instructions.push(`  store ${port.llvmType} ${port.varName}, ${port.llvmType}* ${tmpPtr}`);
+        instructions.push(`  ${result} = call i1 @aether_string_${propName}(${port.llvmType}* ${tmpPtr})`);
+      } else {
+        instructions.push(`  ${result} = call i1 @aether_string_${propName}(${port.llvmType} ${port.varName})`);
+      }
       return { instructions, resultVar: result, supported: true };
     }
   }
@@ -185,7 +209,15 @@ export function contractToLLVM(
       const n2 = c();
       const lenVar = `%len_${n1}`;
       const cmpVar = `%cmp_${n2}`;
-      instructions.push(`  ${lenVar} = call i64 @aether_string_length(${port.llvmType} ${port.varName})`);
+      if (isLargeStruct(port.llvmType)) {
+        // MSVC ABI: pass struct via pointer
+        const tmpPtr = `%tmp_ptr_${n1}`;
+        instructions.push(`  ${tmpPtr} = alloca ${port.llvmType}`);
+        instructions.push(`  store ${port.llvmType} ${port.varName}, ${port.llvmType}* ${tmpPtr}`);
+        instructions.push(`  ${lenVar} = call i64 @aether_string_length(${port.llvmType}* ${tmpPtr})`);
+      } else {
+        instructions.push(`  ${lenVar} = call i64 @aether_string_length(${port.llvmType} ${port.varName})`);
+      }
       const icmpOp = op === ">" ? "sgt" : op === ">=" ? "sge" : op === "<" ? "slt" : op === "<=" ? "sle" : op === "==" ? "eq" : "ne";
       instructions.push(`  ${cmpVar} = icmp ${icmpOp} i64 ${lenVar}, ${numStr}`);
       return { instructions, resultVar: cmpVar, supported: true };
@@ -193,7 +225,7 @@ export function contractToLLVM(
   }
 
   // x > N, x >= N, x < N, x <= N, x == N, x != N  (integer comparisons)
-  const cmpMatch = expr.match(/^(\w+)\s*(>|>=|<|<=|==|!=)\s*(.+)$/);
+  const cmpMatch = expr.match(/^(\w+)\s*(>=|<=|!=|==|>|<)\s*(.+)$/);
   if (cmpMatch) {
     const [, lhs, op, rhs] = cmpMatch;
     const lhsPort = portVars.get(lhs);
@@ -203,6 +235,15 @@ export function contractToLLVM(
     const rhsPort = portVars.get(rhsTrimmed);
 
     if (lhsPort) {
+      // Can't compare struct types (AetherString, etc.) with icmp/fcmp
+      if (isLargeStruct(lhsPort.llvmType)) {
+        return {
+          instructions: [`; CONTRACT SKIPPED: "${expr}" (struct comparison not supported in native code)`],
+          resultVar: "",
+          supported: false,
+        };
+      }
+
       const n = c();
       const cmpVar = `%cmp_${n}`;
       const icmpOp = op === ">" ? "sgt" : op === ">=" ? "sge" : op === "<" ? "slt" : op === "<=" ? "sle" : op === "==" ? "eq" : "ne";
@@ -212,7 +253,10 @@ export function contractToLLVM(
         if (rhsPort) {
           instructions.push(`  ${cmpVar} = fcmp ${fcmpOp} ${lhsPort.llvmType} ${lhsPort.varName}, ${rhsPort.varName}`);
         } else {
-          instructions.push(`  ${cmpVar} = fcmp ${fcmpOp} ${lhsPort.llvmType} ${lhsPort.varName}, ${rhsTrimmed === "true" ? "1.0" : rhsTrimmed === "false" ? "0.0" : rhsTrimmed}`);
+          // Ensure floating point literal has decimal point
+          let fpLiteral = rhsTrimmed === "true" ? "1.0" : rhsTrimmed === "false" ? "0.0" : rhsTrimmed;
+          if (/^\d+$/.test(fpLiteral)) fpLiteral += ".0";
+          instructions.push(`  ${cmpVar} = fcmp ${fcmpOp} ${lhsPort.llvmType} ${lhsPort.varName}, ${fpLiteral}`);
         }
       } else if (lhsPort.llvmType === "i1") {
         // Boolean comparison
@@ -302,6 +346,11 @@ function generateRecoveryWrapper(
       ? `check_recovery_${sid}_${labelIdx + 1}`
       : `unhandled_recovery_${sid}`;
 
+    // Emit the check label for entries after the first (first is inline in handle_recovery)
+    if (i > 0) {
+      lines.push(`${checkLabel}:`);
+    }
+
     lines.push(`  %is_${sid}_${labelIdx} = call i1 @aether_string_eq_cstr(i8* %condition_${sid}, i8* getelementptr([${condConst.length} x i8], [${condConst.length} x i8]* ${condConst.globalName}, i64 0, i64 0))`);
     lines.push(`  br i1 %is_${sid}_${labelIdx}, label %${actionLabel}, label %${nextLabel}`);
     lines.push("");
@@ -337,9 +386,10 @@ function generateRecoveryWrapper(
         lines.push(`  call void @aether_sleep_ms(i64 %delay_${sid}_${labelIdx})`);
         lines.push(`  %next_attempt_${sid}_${labelIdx} = add i32 %attempt_${sid}_${labelIdx}, 1`);
         lines.push(`  store i32 %next_attempt_${sid}_${labelIdx}, i32* %retry_count_${sid}_${labelIdx}`);
-        // Re-call impl
-        lines.push(`  %retry_impl_${sid}_${labelIdx} = load %${sid}_out (%${sid}_in)*, %${sid}_out (%${sid}_in)** @impl_${sid}`);
-        lines.push(`  %retry_result_${sid}_${labelIdx} = call %${sid}_out %retry_impl_${sid}_${labelIdx}(%${sid}_in %inputs)`);
+        // Re-call impl directly — MSVC ABI: sret + pointer
+        lines.push(`  %retry_buf_${sid}_${labelIdx} = alloca %${sid}_out`);
+        lines.push(`  call void @impl_${sid}(%${sid}_out* sret(%${sid}_out) %retry_buf_${sid}_${labelIdx}, %${sid}_in* %inputs_ptr)`);
+        lines.push(`  %retry_result_${sid}_${labelIdx} = load %${sid}_out, %${sid}_out* %retry_buf_${sid}_${labelIdx}`);
         lines.push(`  %retry_err_${sid}_${labelIdx} = call i1 @aether_has_error()`);
         lines.push(`  br i1 %retry_err_${sid}_${labelIdx}, label %retry_loop_${sid}_${labelIdx}, label %retry_success_${sid}_${labelIdx}`);
         lines.push("");
@@ -503,7 +553,8 @@ function generateConfidenceGate(
   lines.push("");
   lines.push(`skip_node_${sid}:`);
   lines.push(`  call void @aether_log_skip(i8* getelementptr([${nodeNameConst.length} x i8], [${nodeNameConst.length} x i8]* ${nodeNameConst.globalName}, i64 0, i64 0), double %node_conf_raw_${sid})`);
-  lines.push(`  br label %continue_${sid}`);
+  lines.push(`  store %${sid}_out zeroinitializer, %${sid}_out* %sret_ptr`);
+  lines.push(`  ret void`);
   lines.push("");
   lines.push(`execute_node_${sid}:`);
 
@@ -606,7 +657,7 @@ export class LLVMCodeGenerator {
 
     const idx = this.stringConstants.size;
     const globalName = `@.str.${idx}`;
-    const length = value.length + 1; // null terminator
+    const length = llvmStringByteLength(value) + 1; // +1 for null terminator
     this.stringConstants.set(value, { globalName, length });
     return { globalName, length };
   }
@@ -634,9 +685,12 @@ export class LLVMCodeGenerator {
     lines.push(`; Pure: ${node.pure ?? false}, Confidence: ${node.confidence ?? "unspecified"}`);
     if (hasRecovery) lines.push(`; Recovery: ${Object.keys(node.recovery!).join(", ")}`);
 
-    // Function signature
-    lines.push(`define %${sid}_out @aether_${sid}(%${sid}_in %inputs) {`);
+    // Function signature — MSVC ABI: sret for output, pointer for input
+    lines.push(`define void @aether_${sid}(%${sid}_out* sret(%${sid}_out) %sret_ptr, %${sid}_in* %inputs_ptr) {`);
     lines.push("entry:");
+
+    // Load input struct from pointer
+    lines.push(`  %inputs = load %${sid}_in, %${sid}_in* %inputs_ptr`);
 
     // Extract input ports
     const inPorts = Object.entries(node.in);
@@ -697,10 +751,11 @@ export class LLVMCodeGenerator {
         lines.push("pre_fail:");
 
         const nameConst = this.addStringConstant(node.id);
-        const preConst = this.addStringConstant("pre");
-        this.declareRuntime("declare void @aether_contract_violation(i8*, i8*)");
-        lines.push(`  call void @aether_contract_violation(i8* getelementptr([${nameConst.length} x i8], [${nameConst.length} x i8]* ${nameConst.globalName}, i64 0, i64 0), i8* getelementptr([${preConst.length} x i8], [${preConst.length} x i8]* ${preConst.globalName}, i64 0, i64 0))`);
-        lines.push("  unreachable");
+        const preConst = this.addStringConstant("precondition");
+        const preExprConst = this.addStringConstant(preContracts.join(" && "));
+        lines.push(`  call void @aether_contract_violation(i8* getelementptr([${nameConst.length} x i8], [${nameConst.length} x i8]* ${nameConst.globalName}, i64 0, i64 0), i8* getelementptr([${preConst.length} x i8], [${preConst.length} x i8]* ${preConst.globalName}, i64 0, i64 0), i8* getelementptr([${preExprConst.length} x i8], [${preExprConst.length} x i8]* ${preExprConst.globalName}, i64 0, i64 0))`);
+        // In non-abort modes, contract_violation returns — fall through to body
+        lines.push("  br label %body");
         lines.push("");
         lines.push("body:");
       }
@@ -712,10 +767,11 @@ export class LLVMCodeGenerator {
       lines.push("body:");
     }
 
-    // Implementation call (calls into runtime-provided function pointer)
-    this.declareRuntime(`@impl_${sid} = external global %${sid}_out (%${sid}_in)*`);
-    lines.push(`  %impl_fn = load %${sid}_out (%${sid}_in)*, %${sid}_out (%${sid}_in)** @impl_${sid}`);
-    lines.push(`  %result = call %${sid}_out %impl_fn(%${sid}_in %inputs)`);
+    // Implementation call — MSVC ABI: sret + pointer
+    this.declareRuntime(`declare void @impl_${sid}(%${sid}_out* sret(%${sid}_out), %${sid}_in*)`);
+    lines.push(`  %result_ptr = alloca %${sid}_out`);
+    lines.push(`  call void @impl_${sid}(%${sid}_out* sret(%${sid}_out) %result_ptr, %${sid}_in* %inputs_ptr)`);
+    lines.push(`  %result = load %${sid}_out, %${sid}_out* %result_ptr`);
 
     // Recovery wrapper (after impl call, checks for errors)
     if (hasRecovery) {
@@ -769,10 +825,11 @@ export class LLVMCodeGenerator {
         lines.push("post_fail:");
 
         const nameConst = this.addStringConstant(node.id);
-        const postConst = this.addStringConstant("post");
-        this.declareRuntime("declare void @aether_contract_violation(i8*, i8*)");
-        lines.push(`  call void @aether_contract_violation(i8* getelementptr([${nameConst.length} x i8], [${nameConst.length} x i8]* ${nameConst.globalName}, i64 0, i64 0), i8* getelementptr([${postConst.length} x i8], [${postConst.length} x i8]* ${postConst.globalName}, i64 0, i64 0))`);
-        lines.push("  unreachable");
+        const postConst = this.addStringConstant("postcondition");
+        const postExprConst = this.addStringConstant(postContracts.join(" && "));
+        lines.push(`  call void @aether_contract_violation(i8* getelementptr([${nameConst.length} x i8], [${nameConst.length} x i8]* ${nameConst.globalName}, i64 0, i64 0), i8* getelementptr([${postConst.length} x i8], [${postConst.length} x i8]* ${postConst.globalName}, i64 0, i64 0), i8* getelementptr([${postExprConst.length} x i8], [${postExprConst.length} x i8]* ${postExprConst.globalName}, i64 0, i64 0))`);
+        // In non-abort modes, contract_violation returns — fall through to done
+        lines.push("  br label %done");
         lines.push("");
         lines.push("done:");
       }
@@ -813,27 +870,16 @@ export class LLVMCodeGenerator {
       }
     }
 
-    if (!hasPostCheck) {
-      for (const port of Object.values(node.in)) {
-        if (port.type === "String") {
-          this.declareRuntime("declare i64 @aether_string_length(%String*)");
-        }
-      }
-    }
+    // String runtime functions are declared via addRuntimeDeclarations
 
-    // Confidence propagation
+    // Confidence propagation — store the propagated value
     if (hasConfidenceGate) {
       const nodeNameConst = this.addStringConstant(node.id);
       lines.push(`  call void @aether_confidence_set(i8* getelementptr([${nodeNameConst.length} x i8], [${nodeNameConst.length} x i8]* ${nodeNameConst.globalName}, i64 0, i64 0), double %node_conf_raw_${sid})`);
     }
 
-    if (hasConfidenceGate) {
-      lines.push(`  br label %continue_${sid}`);
-      lines.push("");
-      lines.push(`continue_${sid}:`);
-    }
-
-    lines.push(`  ret %${sid}_out %result`);
+    lines.push(`  store %${sid}_out %result, %${sid}_out* %sret_ptr`);
+    lines.push(`  ret void`);
     lines.push("}");
 
     return lines.join("\n");
@@ -853,12 +899,10 @@ export class LLVMCodeGenerator {
     lines.push("entry:");
     // Cast void* arg → typed input struct pointer
     lines.push(`  %in_ptr = bitcast i8* %arg to %${sid}_in*`);
-    lines.push(`  %inputs = load %${sid}_in, %${sid}_in* %in_ptr`);
-    // Call the node function
-    lines.push(`  %result = call %${sid}_out @aether_${sid}(%${sid}_in %inputs)`);
-    // Cast void* result_buf → typed output struct pointer and store
+    // Cast void* result_buf → typed output struct pointer
     lines.push(`  %out_ptr = bitcast i8* %result_buf to %${sid}_out*`);
-    lines.push(`  store %${sid}_out %result, %${sid}_out* %out_ptr`);
+    // Call the node function — MSVC ABI: sret + pointer
+    lines.push(`  call void @aether_${sid}(%${sid}_out* sret(%${sid}_out) %out_ptr, %${sid}_in* %in_ptr)`);
     lines.push("  ret void");
     lines.push("}");
 
@@ -900,18 +944,21 @@ export class LLVMCodeGenerator {
     lines.push("define i32 @main() {");
     lines.push("entry:");
 
+    // Initialize runtime (must come first)
+    const contractModeInt = this.options.contractMode === "count" ? 2 : this.options.contractMode === "log" ? 1 : 0;
+    lines.push("  ; Initialize AETHER runtime");
+    lines.push(`  call void @aether_runtime_init(double 0.7, i32 ${contractModeInt})`);
+
     // Initialize arena for temporary allocations
     lines.push("  ; Arena allocation for temporaries");
     lines.push("  %arena = alloca %AetherArena");
-    lines.push(`  %arena_init = call %AetherArena @aether_arena_new(i64 ${arenaSize})`);
-    lines.push("  store %AetherArena %arena_init, %AetherArena* %arena");
+    lines.push(`  call void @aether_arena_new(%AetherArena* sret(%AetherArena) %arena, i64 ${arenaSize})`);
 
     // Initialize execution log
     if (this.options.executionLogging) {
       lines.push("  ; Execution log");
       lines.push("  %exec_log = alloca %AetherExecutionLog");
-      lines.push("  %log_init = call %AetherExecutionLog @aether_log_new()");
-      lines.push("  store %AetherExecutionLog %log_init, %AetherExecutionLog* %exec_log");
+      lines.push("  call void @aether_log_new(%AetherExecutionLog* sret(%AetherExecutionLog) %exec_log)");
     }
 
     // Initialize thread pool for parallel execution
@@ -982,6 +1029,7 @@ export class LLVMCodeGenerator {
         const sid = safeId(nodeId);
 
         lines.push(`  %input_${sid} = alloca %${sid}_in`);
+        lines.push(`  store %${sid}_in zeroinitializer, %${sid}_in* %input_${sid}`);
 
         const inPorts = Object.entries(node.in);
         for (let i = 0; i < inPorts.length; i++) {
@@ -1041,9 +1089,10 @@ export class LLVMCodeGenerator {
           if (!node) continue;
           const sid = safeId(nodeId);
 
-          const inputVal = `%input_val_${sid}`;
-          lines.push(`  ${inputVal} = load %${sid}_in, %${sid}_in* %input_${sid}`);
-          lines.push(`  %result_${sid} = call %${sid}_out @aether_${sid}(%${sid}_in ${inputVal})`);
+          // MSVC ABI: sret + pointer
+          lines.push(`  %result_buf_${sid} = alloca %${sid}_out`);
+          lines.push(`  call void @aether_${sid}(%${sid}_out* sret(%${sid}_out) %result_buf_${sid}, %${sid}_in* %input_${sid})`);
+          lines.push(`  %result_${sid} = load %${sid}_out, %${sid}_out* %result_buf_${sid}`);
 
           const confCode = generateConfidenceCode(node, sid);
           if (confCode) lines.push(confCode);
@@ -1090,9 +1139,10 @@ export class LLVMCodeGenerator {
                 lines.push(`  store %${sid}_in ${insertVar}, %${sid}_in* %input_${sid}`);
               }
             }
-            const inputVal = `%input_val_${sid}`;
-            lines.push(`  ${inputVal} = load %${sid}_in, %${sid}_in* %input_${sid}`);
-            lines.push(`  %result_${sid} = call %${sid}_out @aether_${sid}(%${sid}_in ${inputVal})`);
+            // MSVC ABI: sret + pointer
+            lines.push(`  %result_buf_${sid} = alloca %${sid}_out`);
+            lines.push(`  call void @aether_${sid}(%${sid}_out* sret(%${sid}_out) %result_buf_${sid}, %${sid}_in* %input_${sid})`);
+            lines.push(`  %result_${sid} = load %${sid}_out, %${sid}_out* %result_buf_${sid}`);
           }
         }
       }
@@ -1110,6 +1160,7 @@ export class LLVMCodeGenerator {
       lines.push("  call void @aether_log_free(%AetherExecutionLog* %exec_log)");
     }
     lines.push("  call void @aether_arena_free(%AetherArena* %arena)");
+    lines.push("  call void @aether_runtime_finalize()");
     lines.push("  ret i32 0");
     lines.push("}");
 
@@ -1133,7 +1184,8 @@ export class LLVMCodeGenerator {
     // Runtime struct definitions (match C ABI)
     allStructs.push(...generateRuntimeStructs());
 
-    if (hasStrings) allStructs.push(generateStringStruct());
+    // %AetherString is already defined in generateRuntimeStructs()
+    // No need for a separate %String alias
     for (const elemType of listTypes) {
       allStructs.push(generateListStruct(elemType));
     }
@@ -1216,37 +1268,10 @@ export class LLVMCodeGenerator {
   /**
    * Add common runtime declarations based on node usage.
    */
-  private addCommonDeclarations(declarations: string[], nodes: AetherNode[]): void {
-    const declSet = new Set(declarations);
-    const needed: string[] = [];
-
-    // Always need contract violation handler
-    const contractDecl = "declare void @aether_contract_violation(i8*, i8*)";
-    if (!declSet.has(contractDecl)) needed.push(contractDecl);
-
-    // Check if we need string helpers
-    for (const node of nodes) {
-      for (const ann of [...Object.values(node.in), ...Object.values(node.out)]) {
-        if (ann.type === "String") {
-          const strLen = "declare i64 @aether_string_length(%String*)";
-          if (!declSet.has(strLen)) { needed.push(strLen); declSet.add(strLen); }
-          const strLower = "declare i1 @aether_string_is_lowercase(%String*)";
-          if (!declSet.has(strLower)) { needed.push(strLower); declSet.add(strLower); }
-          const strTrim = "declare i1 @aether_string_is_trimmed(%String*)";
-          if (!declSet.has(strTrim)) { needed.push(strTrim); declSet.add(strTrim); }
-        }
-        if (ann.type.startsWith("List<")) {
-          const listContains = "declare i1 @aether_list_contains(%List_i64*, i64)";
-          if (!declSet.has(listContains)) { needed.push(listContains); declSet.add(listContains); }
-        }
-      }
-    }
-
-    // Confidence runtime
-    const minConf = "declare double @aether_min_confidence(...)";
-    if (!declSet.has(minConf)) needed.push(minConf);
-
-    declarations.push(...needed);
+  private addCommonDeclarations(_declarations: string[], _nodes: AetherNode[]): void {
+    // All declarations are now handled by addRuntimeDeclarations which uses
+    // the authoritative C runtime signatures. This avoids type mismatches
+    // between inline declarations and the actual C ABI.
   }
 
   /**
@@ -1254,15 +1279,30 @@ export class LLVMCodeGenerator {
    * These match the C ABI calling conventions exactly.
    */
   private addRuntimeDeclarations(declarations: string[]): void {
-    const declSet = new Set(declarations);
+    // Deduplicate by function name — the runtime signatures are authoritative
     const sigs = getRuntimeSignatures();
+    const sigNames = new Set(sigs.map(s => s.name));
+    const filtered = declarations.filter(d => {
+      const nameMatch = d.match(/@([a-zA-Z_][a-zA-Z0-9_]*)\(/);
+      return !nameMatch || !sigNames.has(nameMatch[1]);
+    });
+    declarations.length = 0;
+    declarations.push(...filtered);
 
+    // Add authoritative runtime declarations with MSVC ABI:
+    // - Structs > 8 bytes returned via sret (hidden first pointer param)
+    // - Structs > 8 bytes passed as pointers
     for (const sig of sigs) {
-      const paramStr = sig.params.join(", ");
-      const decl = `declare ${sig.returnType} @${sig.name}(${paramStr})`;
-      if (!declSet.has(decl)) {
-        declarations.push(decl);
-        declSet.add(decl);
+      const returnNeedsSret = isLargeStruct(sig.returnType);
+      const abiParams = sig.params.map(p => isLargeStruct(p) ? `${p}*` : p);
+
+      if (returnNeedsSret) {
+        const sretParam = `${sig.returnType}* sret(${sig.returnType})`;
+        const paramStr = [sretParam, ...abiParams].join(", ");
+        declarations.push(`declare void @${sig.name}(${paramStr})`);
+      } else {
+        const paramStr = abiParams.join(", ");
+        declarations.push(`declare ${sig.returnType} @${sig.name}(${paramStr})`);
       }
     }
   }
@@ -1279,6 +1319,7 @@ export class LLVMCodeGenerator {
     // Target (generic)
     sections.push("");
     sections.push('target datalayout = "e-m:w-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"');
+    sections.push('target triple = "x86_64-pc-windows-msvc"');
 
     // Struct definitions
     if (module.structs.length > 0) {
@@ -1316,16 +1357,22 @@ export class LLVMCodeGenerator {
 // ─── String Escaping ──────────────────────────────────────────────────────────
 
 function escapeStringForLLVM(s: string): string {
+  // Encode to UTF-8 bytes, then escape non-printable/non-ASCII bytes
+  const bytes = Buffer.from(s, "utf-8");
   let result = "";
-  for (const ch of s) {
-    const code = ch.charCodeAt(0);
-    if (code >= 32 && code < 127 && ch !== '"' && ch !== "\\") {
-      result += ch;
+  for (const byte of bytes) {
+    if (byte >= 32 && byte < 127 && byte !== 0x22 /* " */ && byte !== 0x5c /* \\ */) {
+      result += String.fromCharCode(byte);
     } else {
-      result += `\\${code.toString(16).padStart(2, "0")}`;
+      result += `\\${byte.toString(16).padStart(2, "0")}`;
     }
   }
   return result;
+}
+
+/** Get the UTF-8 byte length of a string (for LLVM IR [N x i8] declarations). */
+function llvmStringByteLength(s: string): number {
+  return Buffer.from(s, "utf-8").length;
 }
 
 // ─── Summary ──────────────────────────────────────────────────────────────────

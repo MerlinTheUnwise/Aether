@@ -260,12 +260,23 @@ void aether_effect_log_free(AetherEffectLog* log) {
 
 /* ═══ Contracts ═══ */
 
+/* Contract mode and failure count — used by both contract_violation and contract_assert */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
+static _Thread_local AetherContractMode tls_contract_mode = AETHER_CONTRACT_ABORT;
+static _Thread_local int64_t tls_contract_failures = 0;
+#else
+static AetherContractMode tls_contract_mode = AETHER_CONTRACT_ABORT;
+static int64_t tls_contract_failures = 0;
+#endif
+
 void aether_contract_violation(const char* node_id, const char* contract_type, const char* expression) {
     fprintf(stderr, "AETHER CONTRACT VIOLATION [%s] %s: %s\n",
             node_id ? node_id : "unknown",
             contract_type ? contract_type : "unknown",
             expression ? expression : "(no expression)");
-    abort();
+    if (tls_contract_mode == AETHER_CONTRACT_ABORT) {
+        abort();
+    }
 }
 
 /* ═══ Error State ═══ */
@@ -370,14 +381,6 @@ bool aether_string_eq_cstr(const char* a, const char* b) {
 }
 
 /* ═══ Contracts (extended) ═══ */
-
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_THREADS__)
-static _Thread_local AetherContractMode tls_contract_mode = AETHER_CONTRACT_ABORT;
-static _Thread_local int64_t tls_contract_failures = 0;
-#else
-static AetherContractMode tls_contract_mode = AETHER_CONTRACT_ABORT;
-static int64_t tls_contract_failures = 0;
-#endif
 
 void aether_contract_set_mode(AetherContractMode mode) {
     tls_contract_mode = mode;
@@ -540,6 +543,129 @@ void aether_log_free(AetherExecutionLog* log) {
 
 double aether_time_ms(void) {
     return (double)clock() / (double)CLOCKS_PER_SEC * 1000.0;
+}
+
+/* ═══ Runtime Init/Finalize ═══ */
+
+static double global_confidence_threshold = 0.7;
+static AetherArena global_arena = { NULL, 0, 0 };
+
+void aether_runtime_init(double confidence_threshold, int contract_mode) {
+    global_confidence_threshold = confidence_threshold;
+    aether_contract_set_mode((AetherContractMode)contract_mode);
+    tls_contract_failures = 0;
+    confidence_store_count = 0;
+    tls_escalated = 0;
+    aether_clear_error();
+    global_arena = aether_arena_new(1048576);  /* 1MB default arena */
+}
+
+void aether_runtime_finalize(void) {
+    aether_arena_free(&global_arena);
+}
+
+/* ═══ String helpers ═══ */
+
+AetherString aether_string_from_cstr(const char* s) {
+    return aether_string_new(s);
+}
+
+bool aether_string_contains(AetherString haystack, AetherString needle) {
+    if (!haystack.data || !needle.data) return false;
+    if (needle.length == 0) return true;
+    if (needle.length > haystack.length) return false;
+    for (int64_t i = 0; i <= haystack.length - needle.length; i++) {
+        if (memcmp(haystack.data + i, needle.data, (size_t)needle.length) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* ═══ List helpers ═══ */
+
+bool aether_list_is_sorted(AetherList* list, int (*cmp)(const void*, const void*)) {
+    if (!list || !cmp || list->length <= 1) return true;
+    for (int64_t i = 0; i < list->length - 1; i++) {
+        void* a = (char*)list->data + i * list->element_size;
+        void* b = (char*)list->data + (i + 1) * list->element_size;
+        if (cmp(a, b) > 0) return false;
+    }
+    return true;
+}
+
+bool aether_list_has_duplicates(AetherList* list, bool (*eq)(const void*, const void*)) {
+    return !aether_list_is_distinct(list, eq);
+}
+
+/* ═══ Confidence helpers ═══ */
+
+void aether_confidence_init(double threshold) {
+    global_confidence_threshold = threshold;
+    confidence_store_count = 0;
+}
+
+int aether_confidence_check(double value, double threshold) {
+    return value >= threshold ? 1 : 0;
+}
+
+void aether_confidence_propagate_named(const char* node_id, double value) {
+    aether_confidence_set(node_id, value);
+}
+
+void aether_confidence_report(void) {
+    fprintf(stdout, "═══ AETHER Confidence Report ═══\n");
+    for (int64_t i = 0; i < confidence_store_count; i++) {
+        fprintf(stdout, "  [%s] %.4f%s\n",
+                confidence_store[i].node_id,
+                confidence_store[i].value,
+                confidence_store[i].value < global_confidence_threshold ? " (BELOW THRESHOLD)" : "");
+    }
+    fprintf(stdout, "  Total entries: %lld\n", (long long)confidence_store_count);
+}
+
+/* ═══ Effects helpers ═══ */
+
+void aether_effect_declare(const char* node_id, const char* effect) {
+    (void)node_id;
+    (void)effect;
+    /* Declaration is a compile-time concept; at runtime, just a no-op */
+}
+
+int aether_effect_check_violations(AetherEffectLog* log, const char** allowed, int64_t count) {
+    if (!log || !allowed) return 0;
+    int violations = 0;
+    for (int64_t i = 0; i < log->count; i++) {
+        bool found = false;
+        for (int64_t j = 0; j < count; j++) {
+            if (strstr(log->effects[i], allowed[j]) != NULL) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) violations++;
+    }
+    return violations;
+}
+
+void aether_effect_report(AetherEffectLog* log) {
+    if (!log) return;
+    fprintf(stdout, "═══ AETHER Effect Report ═══\n");
+    for (int64_t i = 0; i < log->count; i++) {
+        fprintf(stdout, "  %s\n", log->effects[i]);
+    }
+    fprintf(stdout, "  Total effects: %lld\n", (long long)log->count);
+}
+
+/* ═══ Arena helpers ═══ */
+
+void* aether_alloc(int64_t bytes) {
+    void* p = aether_arena_alloc(&global_arena, bytes);
+    if (!p) {
+        /* Fall back to malloc if arena is exhausted */
+        return malloc((size_t)bytes);
+    }
+    return p;
 }
 
 /* ═══ Thread Pool ═══ */

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { JITCompiler, TierManager } from "../../src/runtime/jit.js";
+import { RuntimeCompiler, TierManager } from "../../src/runtime/jit.js";
 import type { AetherGraph, AetherNode, TypeAnnotation } from "../../src/ir/validator.js";
 import type { ExecutionProfile, NodeProfile } from "../../src/runtime/profiler.js";
 
@@ -78,7 +78,7 @@ describe("TierManager", () => {
 
   it("promotes Tier 0 → Tier 1 → Tier 2", () => {
     const tm = new TierManager();
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const n1 = makeNode("a", { out: { x: { type: "String" } }, pure: true });
     const n2 = makeNode("b", { in: { x: { type: "String" } }, out: { y: { type: "String" } }, pure: true });
     const graph = makeGraph([n1, n2], [{ from: "a.x", to: "b.x" }]);
@@ -115,7 +115,7 @@ describe("TierManager", () => {
     });
     const graph = makeGraph([n1, n2], [{ from: "a.x", to: "b.x" }]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a", "b"], 1);
 
     expect(compiled.tier).toBe(1);
@@ -137,7 +137,7 @@ describe("TierManager", () => {
       [{ from: "a.x", to: "c.x" }, { from: "b.y", to: "c.y" }]
     );
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a", "b", "c"], 2);
 
     expect(compiled.tier).toBe(2);
@@ -157,7 +157,7 @@ describe("TierManager", () => {
     });
     const graph = makeGraph([n1, n2], [{ from: "a.doubled", to: "b.doubled" }]);
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const tier1 = compiler.compile(graph, ["a", "b"], 1);
     const tier2 = compiler.compile(graph, ["a", "b"], 2);
 
@@ -175,7 +175,7 @@ describe("TierManager", () => {
 
   it("deoptimization falls back to Tier 0", () => {
     const tm = new TierManager();
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const n1 = makeNode("a");
     const graph = makeGraph([n1]);
     const hash = "deopt_test";
@@ -190,7 +190,7 @@ describe("TierManager", () => {
 
   it("deoptimization blacklist: 3 deopts stays at Tier 0", () => {
     const tm = new TierManager();
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const n1 = makeNode("a");
     const graph = makeGraph([n1]);
     const hash = "blacklist_test";

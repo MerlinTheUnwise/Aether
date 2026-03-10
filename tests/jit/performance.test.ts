@@ -4,7 +4,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execute } from "../../src/runtime/executor.js";
 import { ExecutionProfiler } from "../../src/runtime/profiler.js";
-import { JITCompiler } from "../../src/runtime/jit.js";
+import { RuntimeCompiler } from "../../src/runtime/jit.js";
 import type { AetherGraph } from "../../src/ir/validator.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -66,13 +66,13 @@ describe("JIT Performance", () => {
   }
 
   for (const name of referencePrograms) {
-    it(`${name}: JIT compiled execution completes without errors`, async () => {
+    it(`${name}: compiled execution completes without errors`, async () => {
       const graph = loadExample(name);
       const nodeIds = getNodeIds(graph);
 
       if (nodeIds.length < 2) return; // Skip trivial graphs
 
-      const compiler = new JITCompiler();
+      const compiler = new RuntimeCompiler();
       const compiled = compiler.compile(graph as any, nodeIds);
 
       // Execute the compiled function
@@ -105,8 +105,8 @@ describe("JIT Performance", () => {
     }
     const interpAvg = interpTotal / RUNS;
 
-    // JIT compiled runs
-    const compiler = new JITCompiler();
+    // Compiled runs
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph as any, nodeIds);
 
     let jitTotal = 0;

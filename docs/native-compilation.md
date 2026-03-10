@@ -1,5 +1,7 @@
 # Native Compilation
 
+> **Experimental.** The LLVM backend generates valid LLVM IR and includes a C runtime, but end-to-end compilation to running binaries has not been verified in the test suite.
+
 > LLVM backend, C runtime, parallel execution, and benchmarking.
 
 ## Overview

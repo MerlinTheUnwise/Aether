@@ -1,8 +1,9 @@
 /**
  * AETHER Compiler — Graph Optimizer
  *
- * Analyzes graph structure and suggests optimizations. Does NOT modify the graph
- * unless explicitly asked via apply(). The human (or AI) decides what to apply.
+ * Static graph optimizer — analyzes graph structure and suggests optimizations
+ * using 11 rule-based analysis passes. Does NOT modify the graph unless
+ * explicitly asked via apply(). The human decides what to apply.
  *
  * Optimization types:
  * - merge_sequential_pure: merge pure nodes in strict sequence

@@ -37,10 +37,10 @@ describe("LLVM Type Mapper", () => {
       expect(r.llvmType).toBe("double");
     });
 
-    it("String → %String*", () => {
+    it("String → %AetherString", () => {
       const r = mapTypeToLLVM({ type: "String" });
-      expect(r.llvmType).toBe("%String*");
-      expect(r.byteSize).toBe(8);
+      expect(r.llvmType).toBe("%AetherString");
+      expect(r.byteSize).toBe(16);
     });
   });
 
@@ -50,32 +50,32 @@ describe("LLVM Type Mapper", () => {
       expect(r.llvmType).toBe("%List_i64*");
     });
 
-    it("List<String> → %List_String*", () => {
+    it("List<String> → %List_AetherString*", () => {
       const r = mapTypeToLLVM({ type: "List<String>" });
-      expect(r.llvmType).toBe("%List_String*");
+      expect(r.llvmType).toBe("%List_AetherString*");
     });
 
-    it("List<Product> → %List_Product*", () => {
+    it("List<Product> → %List_i8*", () => {
       const r = mapTypeToLLVM({ type: "List<Product>" });
-      expect(r.llvmType).toBe("%List_Product*");
+      expect(r.llvmType).toBe("%List_i8*");
     });
 
-    it("Map<String, Int> → %Map_String_i64*", () => {
+    it("Map<String, Int> → %Map_AetherString_i64*", () => {
       const r = mapTypeToLLVM({ type: "Map<String, Int>" });
-      expect(r.llvmType).toBe("%Map_String_i64*");
+      expect(r.llvmType).toBe("%Map_AetherString_i64*");
     });
   });
 
   describe("Record/domain types", () => {
-    it("AuthenticatedUser → %AuthenticatedUser*", () => {
+    it("AuthenticatedUser → i8* (opaque pointer)", () => {
       const r = mapTypeToLLVM({ type: "AuthenticatedUser" });
-      expect(r.llvmType).toBe("%AuthenticatedUser*");
+      expect(r.llvmType).toBe("i8*");
       expect(r.byteSize).toBe(8);
     });
 
-    it("User → %User*", () => {
+    it("User → i8* (opaque pointer)", () => {
       const r = mapTypeToLLVM({ type: "User" });
-      expect(r.llvmType).toBe("%User*");
+      expect(r.llvmType).toBe("i8*");
     });
   });
 
@@ -149,7 +149,7 @@ describe("LLVM Type Mapper", () => {
     it("generates input struct with correct field count", () => {
       const structs = generateNodeStructs(node);
       expect(structs).toContain("%validate_email_in = type");
-      expect(structs).toContain("%String*"); // email field
+      expect(structs).toContain("%AetherString"); // email field
     });
 
     it("generates output struct with correct field count", () => {
@@ -179,7 +179,7 @@ describe("LLVM Type Mapper", () => {
       };
 
       const structs = generateNodeStructs(multiNode);
-      expect(structs).toContain("%String*, i1");
+      expect(structs).toContain("%AetherString, i1");
     });
   });
 

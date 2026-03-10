@@ -19,7 +19,7 @@ describe("Proof Generator", () => {
       const graph = loadGraph("user-registration");
       const result = generateProofExport(graph);
       expect(result.filename).toBe("user_registration.lean");
-      expect(result.source).toContain("AETHER Proof Certificate");
+      expect(result.source).toContain("AETHER Proof Skeleton");
       expect(result.source).toContain("import Mathlib");
     });
 

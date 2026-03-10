@@ -2,28 +2,19 @@
 
 **Programs are graphs, not text.**
 
-AETHER is a programming language where programs are directed acyclic graphs (DAGs) with formal contracts, confidence tracking, and parallel-by-default execution. Every node declares its types, effects, preconditions, postconditions, and recovery strategies.
+AETHER is a TypeScript toolchain for authoring, validating, verifying, and executing
+programs expressed as JSON-encoded directed acyclic graphs (DAGs). Each node declares
+typed inputs/outputs, contracts verified by Z3, confidence annotations, side-effect
+declarations, and recovery strategies.
 
-Three execution layers:
+It is designed as an intermediate representation for AI-generated programs —
+specifically targeting safety-critical workflows where every node must declare its
+contracts, effects, uncertainty, and failure handling.
 
-| Layer | How It Works |
-|-------|-------------|
-| **Interpreted** | Wave-based DAG executor with stub or real implementations |
-| **JIT** | Tiered compilation (Tier 0/1/2) with profiling and deoptimization |
-| **Native (LLVM)** | LLVM IR code generation with C runtime |
-
-## Status
-
-**1523 tests passing** across 105 test files. Zero TypeScript errors. 73 source files. 31 CLI commands.
-
-16 reference programs including 2 real-world end-to-end workflows (500-row data pipeline, 7-node API orchestration).
-
-All five phases complete.
-
-## What It Does
+## What It Actually Does
 
 1. **Graph-Native** — Programs are JSON DAGs, not text files
-2. **Proof-Carrying** — Every node has contracts verified by Z3 SMT solver
+2. **Contract-Verified** — Every node has contracts verified by Z3 SMT solver and optional Lean 4 proof export
 3. **Intent-Declarative** — Declare what you want; runtime selects from 6 certified algorithms
 4. **Confidence-Aware** — Uncertainty is structural; adversarial self-checks required below 0.85
 5. **Effect-Tracked** — All side effects declared and enforced (hierarchy: parent covers children)
@@ -31,6 +22,31 @@ All five phases complete.
 7. **Self-Healing** — Every error path has typed recovery (retry, fallback, escalate, respond, report)
 8. **Incremental-Verifiable** — Partial graphs with typed holes; each node validated independently
 9. **Context-Scoped** — Work on subgraphs with boundary contracts
+
+## What Works Today
+
+| Feature | Status | Details |
+|---------|--------|---------|
+| IR schema + validator | Production-ready | JSON Schema, 7 validation rules, DAG check |
+| Semantic type checker | Production-ready | 6-dimension type compatibility (domain, unit, sensitivity, etc.) |
+| Z3 contract verifier | Production-ready | Arithmetic, boolean, comparisons, implication. See Known Limitations for coverage gaps |
+| Interpreted executor | Production-ready | Wave-based parallel scheduling, confidence gating, recovery |
+| Compiled optimization | Production-ready | Compiles hot subgraphs to optimized JavaScript functions (Tier 0/1/2) |
+| Static graph optimizer | Production-ready | 11 rule-based analysis passes (merge, parallelize, eliminate, etc.) |
+| Real execution mode | Production-ready | 16 programs with real computation logic and in-memory service simulation |
+| Compact form | Production-ready | `.aether` text format, 60-70% smaller, round-trip guaranteed |
+| Verification dashboard | Production-ready | Self-contained HTML with per-node verification breakdown |
+| Interactive demo | Production-ready | Browser-based pipeline: describe → generate → validate → visualize → verify → execute |
+| Visual graph editor | Production-ready | Browser-based interactive DAG editor with drag, zoom, port connection |
+| Local package registry | Production-ready | Semver dependency resolution, 10 published stdlib packages |
+
+## What's Experimental
+
+| Feature | Status | What Works | What Doesn't |
+|---------|--------|------------|-------------|
+| LLVM native backend | Experimental | LLVM IR generation, C runtime header | End-to-end compilation to running binaries not verified in test suite |
+| Lean 4 proof export | Experimental | Proof skeletons with type mappings | Most non-trivial contracts produce `sorry` placeholders requiring manual completion |
+| Multi-agent collaboration | Simulated | Protocol, scope assignment, integration checks | Single-process simulation only, no distributed execution |
 
 ## Quick Start
 
@@ -57,7 +73,7 @@ npx tsx src/cli.ts visualize src/ir/examples/user-registration.json
 ### Real Execution
 
 ```bash
-# Execute with real implementations (not stubs)
+# Execute with real implementations (in-memory service simulation)
 npx tsx src/cli.ts execute src/ir/examples/real-world/api-orchestration.json \
   --real --seed test-data/api-orchestration/seed.json --contracts warn
 
@@ -76,14 +92,22 @@ npx tsx src/cli.ts build-runtime
 npx tsx src/cli.ts benchmark src/ir/examples/user-registration.json --runs 50
 ```
 
+### Demo & Visualization
+
+```bash
+npx tsx src/cli.ts demo --open                                              # Interactive demo
+npx tsx src/cli.ts editor src/ir/examples/user-registration.json --open     # Visual graph editor
+npx tsx src/cli.ts dashboard src/ir/examples/user-registration.json --open  # Verification dashboard
+```
+
 ### Analysis & Optimization
 
 ```bash
-npx tsx src/cli.ts generate my-program.json           # Validate AI-generated IR
+npx tsx src/cli.ts generate my-program.json           # Validate generated IR
 npx tsx src/cli.ts resolve src/ir/examples/intent-data-pipeline.json  # Resolve intents
 npx tsx src/cli.ts diff v1.json v2.json                # Semantic diff
-npx tsx src/cli.ts export-proofs src/ir/examples/user-registration.json  # Lean 4 proofs
-npx tsx src/cli.ts optimize src/ir/examples/user-registration.json      # Graph optimizer
+npx tsx src/cli.ts export-proofs src/ir/examples/user-registration.json  # Lean 4 proof skeletons
+npx tsx src/cli.ts optimize src/ir/examples/user-registration.json      # Static graph optimizer
 npx tsx src/cli.ts profile src/ir/examples/user-registration.json --runs 20
 npx tsx src/cli.ts jit src/ir/examples/user-registration.json
 npx tsx src/cli.ts dashboard src/ir/examples/user-registration.json --open
@@ -115,13 +139,13 @@ npx tsx src/cli.ts collaborate src/ir/examples/multi-agent-marketplace.json
 | `template-showcase` | 2+3 | Template instantiation, parameterized patterns |
 | `scoped-ecommerce` | 8 | Scope boundaries, cross-scope contracts |
 | `multi-scope-order` | 4 scopes | Multi-scope ordering, boundary compatibility |
-| `multi-agent-marketplace` | 12 | 4-agent collaboration, integration verification |
+| `multi-agent-marketplace` | 12 | 4-agent collaboration (single-process simulation), integration verification |
 | `intent-data-pipeline` | 6 | Intent nodes, certified algorithm resolution |
 | `intent-data-pipeline-v2` | 7 | Version evolution, semantic diff target |
 | `real-world/sales-analytics` | 10 | 500-row CSV pipeline: validate → deduplicate → anomaly detect → analytics → report → archive → email |
 | `real-world/api-orchestration` | 7 | E-commerce order flow: auth → inventory → payment → order → shipment → email → response |
 
-The two `real-world/` programs have full implementations (not stubs) with real computation, database queries, CSV parsing, and email sending.
+The two `real-world/` programs have real computation logic (sorts actually sort, aggregations actually sum). All service I/O (database, filesystem, email) is in-memory simulation.
 
 ## Project Structure
 
@@ -141,14 +165,14 @@ src/
     templates.ts             # Template engine (validate, instantiate, substitute)
     scopes.ts                # Scope extraction and boundary verification
     incremental.ts           # Incremental builder (partial graphs)
-    optimizer.ts             # Graph optimizer (11 optimization types)
+    optimizer.ts             # Static graph optimizer (11 rule-based analysis passes)
     llvm/
       codegen.ts             # LLVM IR code generator
       types.ts               # AETHER → LLVM IR type mapper
       confidence.ts          # Confidence propagation IR generation
       pipeline.ts            # Full compilation pipeline (validate → binary)
       stubs.ts               # C stub implementation generator
-      benchmark.ts           # Benchmark suite (interpreted vs JIT vs native)
+      benchmark.ts           # Benchmark suite (interpreted vs compiled vs native)
       runtime/
         aether_runtime.c     # Native C runtime
         aether_runtime.h     # Runtime header
@@ -159,7 +183,7 @@ src/
     confidence.ts            # Confidence propagation engine
     effects.ts               # Effect tracking and enforcement
     profiler.ts              # Execution profiler (hot path detection)
-    jit.ts                   # JIT compiler (tiered: Tier 0/1/2, deoptimization)
+    jit.ts                   # Runtime code generator (tiered: Tier 0/1/2, deoptimization)
     evaluator/               # Expression evaluator (lexer, parser, checker)
   implementations/
     registry.ts              # Implementation resolution (exact ID, pattern, type sig)
@@ -175,7 +199,7 @@ src/
   proofs/
     lean-types.ts            # AETHER → Lean 4 type mapper
     lean-contracts.ts        # Contract → Lean 4 proposition translator
-    generate.ts              # Lean 4 proof certificate generator
+    generate.ts              # Lean 4 proof skeleton generator
   dashboard/
     collector.ts             # Dashboard data aggregator
     render.ts                # Self-contained HTML dashboard generator
@@ -185,13 +209,18 @@ src/
     simulator.ts             # Agent simulation and integration testing
   visualizer/
     generate.ts              # SVG-based HTML graph visualization
+  editor/
+    generate.ts              # Interactive visual graph editor
+    templates.ts             # Editor CSS/JS/HTML templates
+  demo/
+    generate.ts              # Interactive demo application generator
   stdlib/
     certified/               # 6 verified algorithms
     patterns/                # 4 reusable templates
-  cli.ts                     # Unified CLI (31 commands)
+  cli.ts                     # Unified CLI (32 commands)
 docs/                        # 9 reference documents
 spec/                        # 5 formal specifications
-tests/                       # 105 test files, 1523 tests
+tests/                       # 126 test files, 1836 tests
 test-data/                   # Seed data and inputs for real-world programs
 ```
 
@@ -206,15 +235,46 @@ Documentation is in [`docs/`](docs/index.md):
 | [Type System](docs/type-system.md) | Semantic types, state machines |
 | [Contracts & Verification](docs/contracts.md) | Contract expressions, Z3 verification |
 | [Patterns Cookbook](docs/patterns.md) | 14 IR patterns to copy and adapt |
-| [CLI Reference](docs/cli-reference.md) | All 31 commands with flags |
-| [Scopes & Collaboration](docs/collaboration.md) | Context-scoped loading, multi-agent protocol |
-| [Native Compilation](docs/native-compilation.md) | LLVM backend, C runtime, benchmarking |
+| [CLI Reference](docs/cli-reference.md) | All 32 commands with flags |
+| [Scopes & Collaboration](docs/collaboration.md) | Context-scoped loading, multi-agent protocol (single-process simulation) |
+| [Native Compilation](docs/native-compilation.md) | LLVM backend (experimental), C runtime, benchmarking |
+
+## Design Philosophy
+
+The nine pillars are real design principles enforced throughout the toolchain — not claims about completeness:
+
+1. **Graph-Native** — Programs are DAGs, not text files
+2. **Contract-Verified** — Contracts verified by Z3; optional Lean 4 proof skeleton export
+3. **Intent-Declarative** — Declare properties, runtime selects algorithms
+4. **Confidence-Aware** — Uncertainty is structural; adversarial self-checks below 0.85
+5. **Effect-Tracked** — All side effects declared and enforced
+6. **Parallel-Default** — Concurrency derived from graph structure
+7. **Self-Healing** — Every error path has typed recovery
+8. **Incremental-Verifiable** — Each node validated independently; partial graphs supported
+9. **Context-Scoped** — Subgraphs with boundary contracts
+
+## Known Limitations
+
+- Z3 verification covers arithmetic, boolean logic, comparisons, and implications.
+  Quantifiers, set operations, and complex predicates are verified at runtime by the
+  expression evaluator, not formally proved by Z3.
+- The LLVM native backend generates valid LLVM IR but end-to-end compilation
+  to running binaries has not been verified in the test suite.
+- Lean 4 export produces proof skeletons with `sorry` placeholders. Most
+  non-trivial contracts require manual proof completion.
+- All service implementations (database, filesystem, email, HTTP, ML) are
+  in-memory simulations. No real I/O is performed.
+- The graph optimizer uses rule-based static analysis, not machine learning.
+- Multi-agent collaboration is simulated within a single process.
+  No distributed execution capability exists.
+- Programs are authored as JSON (by AI or by hand). The visual editor and demo are read-only viewers, not full authoring environments.
 
 ## Phases
 
 - **Phase 0** — IR schema, validator, type checker, Z3 verifier, transpiler, CLI, formal specs
 - **Phase 1** — DAG executor, compact form, incremental builder, visualization, confidence engine, effect tracker
 - **Phase 2** — State types, templates, scopes, multi-agent collaboration, intent resolution, semantic diff
-- **Phase 3** — JIT compiler, tiered optimization, graph optimizer, Lean 4 proof export, verification dashboard
+- **Phase 3** — Runtime code generator, tiered compilation, static graph optimizer, Lean 4 proof export, verification dashboard
 - **Phase 4** — LLVM native backend, C runtime, compilation pipeline, stub generator, benchmarking
-- **Phase 5** — Implementation registry, service container, real execution mode, expression evaluator, 16 program implementations, real-world end-to-end workflows
+- **Phase 5** — Implementation registry, service container, real execution mode, expression evaluator, 16 program implementations, end-to-end workflows with real computation and in-memory services
+- **Phase 6** — Honest documentation, Z3 gap closure, real I/O adapters, LLVM end-to-end verification, Lean proof deepening, visual graph editor, interactive demo application

@@ -1,10 +1,10 @@
 /**
  * AETHER Runtime — Execution Profiler
  *
- * Tracks execution patterns to identify hot subgraphs worth JIT-compiling.
+ * Tracks execution patterns to identify hot subgraphs worth compiling.
  * - Records per-node timing, confidence, and recovery events
  * - Detects hot paths (frequently-executed multi-wave chains)
- * - Generates JIT compilation recommendations
+ * - Generates compilation recommendations
  */
 
 import type { AetherGraph, AetherNode, AetherEdge } from "../ir/validator.js";
@@ -31,7 +31,7 @@ export interface HotPath {
   wave_count: number;
 }
 
-export interface JITRecommendation {
+export interface CompilationRecommendation {
   subgraph: string[];
   reason: string;
   estimatedSpeedup: string;
@@ -43,7 +43,7 @@ export interface ExecutionProfile {
   totalExecutions: number;
   nodeProfiles: Map<string, NodeProfile>;
   hotPaths: HotPath[];
-  recommendations: JITRecommendation[];
+  recommendations: CompilationRecommendation[];
 }
 
 interface NodeExecutionEntry {
@@ -163,8 +163,8 @@ export class ExecutionProfiler {
     };
   }
 
-  /** Get JIT recommendations */
-  getRecommendations(): JITRecommendation[] {
+  /** Get compilation recommendations */
+  getRecommendations(): CompilationRecommendation[] {
     const profile = this.analyze();
     return profile.recommendations;
   }
@@ -376,8 +376,8 @@ export class ExecutionProfiler {
     minExec: number,
     minAvg: number,
     minNodes: number
-  ): JITRecommendation[] {
-    const recommendations: JITRecommendation[] = [];
+  ): CompilationRecommendation[] {
+    const recommendations: CompilationRecommendation[] = [];
 
     for (const path of hotPaths) {
       if (path.nodes.length < minNodes) continue;

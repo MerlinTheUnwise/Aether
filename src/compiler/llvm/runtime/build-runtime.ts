@@ -26,9 +26,23 @@ export interface BuildResult {
 /**
  * Check if clang is available and return its version.
  */
+function getAugmentedEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  const extraPaths: string[] = [];
+  if (process.platform === "win32") {
+    extraPaths.push("C:\\Program Files\\LLVM\\bin");
+    extraPaths.push("C:\\Program Files (x86)\\LLVM\\bin");
+  } else {
+    extraPaths.push("/usr/local/opt/llvm/bin");
+    extraPaths.push("/opt/homebrew/opt/llvm/bin");
+  }
+  env.PATH = [...extraPaths, env.PATH || ""].join(process.platform === "win32" ? ";" : ":");
+  return env;
+}
+
 export function checkClang(): { found: boolean; version: string } {
   try {
-    const output = execSync("clang --version", { encoding: "utf-8", timeout: 10000 });
+    const output = execSync("clang --version", { encoding: "utf-8", timeout: 10000, env: getAugmentedEnv() });
     const match = output.match(/clang version (\S+)/);
     return { found: true, version: match ? match[1] : "unknown" };
   } catch {
@@ -37,12 +51,26 @@ export function checkClang(): { found: boolean; version: string } {
 }
 
 /**
- * Check if make (or mingw32-make) is available.
+ * Check if ar (or llvm-ar) is available.
  */
+function findAr(): string | null {
+  const env = getAugmentedEnv();
+  for (const cmd of ["ar", "llvm-ar"]) {
+    try {
+      execSync(`${cmd} --version`, { encoding: "utf-8", timeout: 10000, stdio: "pipe", env });
+      return cmd;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
 function findMake(): string | null {
+  const env = getAugmentedEnv();
   for (const cmd of ["make", "mingw32-make"]) {
     try {
-      execSync(`${cmd} --version`, { encoding: "utf-8", timeout: 10000, stdio: "pipe" });
+      execSync(`${cmd} --version`, { encoding: "utf-8", timeout: 10000, stdio: "pipe", env });
       return cmd;
     } catch {
       // continue
@@ -114,16 +142,33 @@ export function buildRuntime(options?: { checkOnly?: boolean }): BuildResult {
   } else {
     // Direct clang invocation as fallback
     try {
+      const isWindows = process.platform === "win32";
+      const objFile = join(runtimeDir, isWindows ? "aether_runtime.obj" : "aether_runtime.o");
+      const fPIC = isWindows ? "" : " -fPIC";
+      const execEnv = getAugmentedEnv();
       // Build object file
       execSync(
-        `clang -std=c11 -Wall -Wextra -Wpedantic -O2 -fPIC -c "${join(runtimeDir, "aether_runtime.c")}" -o "${join(runtimeDir, "aether_runtime.o")}"`,
-        { encoding: "utf-8", timeout: 30000, stdio: "pipe" },
+        `clang -std=c11 -Wall -Wextra -O2${fPIC} -D_CRT_SECURE_NO_WARNINGS -c "${join(runtimeDir, "aether_runtime.c")}" -o "${objFile}"`,
+        { encoding: "utf-8", timeout: 30000, stdio: "pipe", env: execEnv },
       );
-      // Build static lib
-      execSync(
-        `ar rcs "${join(runtimeDir, "libaether_runtime.a")}" "${join(runtimeDir, "aether_runtime.o")}"`,
-        { encoding: "utf-8", timeout: 10000, stdio: "pipe" },
-      );
+      // Build static lib — try ar, then llvm-ar
+      const arCmd = findAr();
+      if (arCmd) {
+        execSync(
+          `${arCmd} rcs "${join(runtimeDir, "libaether_runtime.a")}" "${objFile}"`,
+          { encoding: "utf-8", timeout: 10000, stdio: "pipe", env: execEnv },
+        );
+      } else {
+        // On Windows without ar, use llvm-lib or skip static lib
+        try {
+          execSync(
+            `llvm-lib /out:"${join(runtimeDir, "libaether_runtime.a")}" "${objFile}"`,
+            { encoding: "utf-8", timeout: 10000, stdio: "pipe", env: execEnv },
+          );
+        } catch {
+          result.errors.push("No archiver (ar/llvm-ar/llvm-lib) found to build static library");
+        }
+      }
     } catch (e) {
       const msg = e instanceof Error ? (e as any).stderr || e.message : String(e);
       result.errors.push(`Build failed (direct): ${msg}`);
@@ -162,8 +207,13 @@ export interface RuntimeSignature {
 }
 
 const RUNTIME_SIGNATURES: RuntimeSignature[] = [
+  // Runtime lifecycle
+  { name: "aether_runtime_init", returnType: "void", params: ["double", "i32"], category: "runtime" },
+  { name: "aether_runtime_finalize", returnType: "void", params: [], category: "runtime" },
+
   // String
   { name: "aether_string_new", returnType: "%AetherString", params: ["i8*"], category: "string" },
+  { name: "aether_string_from_cstr", returnType: "%AetherString", params: ["i8*"], category: "string" },
   { name: "aether_string_copy", returnType: "%AetherString", params: ["%AetherString"], category: "string" },
   { name: "aether_string_free", returnType: "void", params: ["%AetherString*"], category: "string" },
   { name: "aether_string_length", returnType: "i64", params: ["%AetherString"], category: "string" },

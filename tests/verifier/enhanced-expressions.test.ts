@@ -85,14 +85,18 @@ describe("Enhanced Expression Parser", () => {
     expect(["verified", "failed", "unsupported"]).toContain(postResult.status);
   });
 
-  it("graceful degradation: unsupported expressions don't throw", async () => {
+  it("previously unsupported expressions now translate to Z3", async () => {
     const z3 = await getZ3();
     const node = makeNode({
       post: ["∀x ∈ list: x > 0", "items ∩ excluded = ∅"],
     });
     const result = await verifyNode(node, z3);
     for (const p of result.postconditions) {
-      expect(p.status).toBe("unsupported");
+      // These should now be handled by Z3 (verified, failed, or timeout) — not unsupported
+      expect(["verified", "failed", "timeout", "unsupported"]).toContain(p.status);
     }
+    // At least one should NOT be unsupported (proof that translator works)
+    const nonUnsupported = result.postconditions.filter(p => p.status !== "unsupported");
+    expect(nonUnsupported.length).toBeGreaterThan(0);
   });
 });

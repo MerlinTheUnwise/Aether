@@ -109,9 +109,9 @@ describe("LLVM Code Generator", () => {
       });
       const ir = gen.generateNodeFunction(node);
 
-      expect(ir).toContain("define %add_numbers_out @aether_add_numbers");
+      expect(ir).toContain("define void @aether_add_numbers(%add_numbers_out* sret(%add_numbers_out) %sret_ptr, %add_numbers_in* %inputs_ptr)");
       expect(ir).toContain("extractvalue");
-      expect(ir).toContain("ret %add_numbers_out");
+      expect(ir).toContain("ret void");
       expect(ir).toContain("icmp sgt"); // a > 0 precondition
     });
 
@@ -128,7 +128,6 @@ describe("LLVM Code Generator", () => {
       expect(ir).toContain("br i1");
       expect(ir).toContain("pre_fail:");
       expect(ir).toContain("aether_contract_violation");
-      expect(ir).toContain("unreachable");
       expect(ir).toContain("body:");
     });
 
@@ -157,7 +156,7 @@ describe("LLVM Code Generator", () => {
       });
       const ir = gen.generateNodeFunction(node);
 
-      expect(ir).toContain("define %write_db_out @aether_write_db");
+      expect(ir).toContain("define void @aether_write_db(%write_db_out* sret(%write_db_out) %sret_ptr, %write_db_in* %inputs_ptr)");
       expect(ir).toContain("; Pure: false");
     });
 

@@ -108,7 +108,7 @@ npx tsx src/cli.ts execute src/ir/examples/user-registration.json --inputs input
 
 | Flag | Effect |
 |---|---|
-| `--jit` | Enable JIT compilation |
+| `--jit` | Enable compiled optimization (compiles hot subgraphs to optimized JavaScript) |
 | `--profile` | Enable profiling |
 | `--inputs <path>` | Provide initial input values (JSON) |
 | `--real` | Enable real execution mode (resolve implementations, enforce contracts) |
@@ -119,7 +119,7 @@ npx tsx src/cli.ts execute src/ir/examples/user-registration.json --inputs input
 Output: wave-by-wave execution log with confidence propagation and effect tracking. In `--real` mode, also shows node outputs and contract satisfaction report.
 
 ### `jit <path> [flags]`
-Profile, JIT-compile, and benchmark a graph.
+Profile, compile hot subgraphs to optimized JavaScript, and benchmark.
 
 ```
 npx tsx src/cli.ts jit src/ir/examples/user-registration.json --runs 20
@@ -130,19 +130,19 @@ npx tsx src/cli.ts jit src/ir/examples/user-registration.json --optimize --runs 
 |---|---|
 | `--runs <N>` | Number of executions (default: 20) |
 | `--threshold <T>` | Min executions before compiling (default: 10) |
-| `--optimize` | Run optimizer before JIT |
+| `--optimize` | Run static optimizer before compilation |
 
 Output: hot path recommendations, compilation summary, before/after performance comparison.
 
 ### `profile <path> [--runs <N>]`
-Profile without JIT compilation.
+Profile without compilation.
 
 ```
 npx tsx src/cli.ts profile src/ir/examples/user-registration.json --runs 20
 ```
 
 ### `benchmark <path> [flags]`
-Compare interpreted vs JIT vs native performance.
+Compare interpreted vs compiled vs native performance.
 
 ```
 npx tsx src/cli.ts benchmark src/ir/examples/user-registration.json --runs 50 --native
@@ -213,7 +213,7 @@ npx tsx src/cli.ts diff intent-data-pipeline.json intent-data-pipeline-v2.json
 Output: change list with breaking change warnings and affected nodes.
 
 ### `export-proofs <path> [--output <path.lean>]`
-Generate Lean 4 proof certificates.
+Generate Lean 4 proof skeletons. Most non-trivial contracts produce `sorry` placeholders requiring manual completion.
 
 ```
 npx tsx src/cli.ts export-proofs src/ir/examples/user-registration.json
@@ -311,6 +311,36 @@ Install a package to `./aether_packages/`.
 
 ### `search <query>`
 Search packages by keyword.
+
+## Interactive Tools
+
+### `editor [path] [--output <p>] [--open]`
+Open interactive visual graph editor in browser.
+
+```
+npx tsx src/cli.ts editor src/ir/examples/user-registration.json --open
+npx tsx src/cli.ts editor --open  # empty editor
+```
+
+| Flag | Effect |
+|---|---|
+| `--output <path>` | Output file path (default: `<id>-editor.html`) |
+| `--open` | Open in default browser |
+
+### `demo [--output <p>] [--open]`
+Generate interactive demo application — describe pipelines in natural language, generate AETHER-IR via Anthropic API, validate, visualize, verify, and simulate execution in-browser.
+
+```
+npx tsx src/cli.ts demo --open
+npx tsx src/cli.ts demo --output my-demo.html
+```
+
+| Flag | Effect |
+|---|---|
+| `--output <path>` | Output file path (default: `aether-demo.html`) |
+| `--open` | Open in default browser |
+
+Includes 4 pre-built examples (user registration, payment processing, content moderation, ETL pipeline) and LLM generation with auto-fix loop (up to 3 attempts).
 
 ## General
 

@@ -25,6 +25,7 @@ export interface CompilationOptions {
   contracts?: "abort" | "log" | "count";  // contract mode, default: "abort"
   stripDebug?: boolean;             // remove debug info, default: false
   verbose?: boolean;                // print each compilation step
+  stubsPath?: string;               // path to generated stubs .c file to link
 }
 
 export interface StageResult {
@@ -59,6 +60,29 @@ export interface ToolchainStatus {
 
 // ─── Toolchain Detection ──────────────────────────────────────────────────────
 
+// Augmented PATH that includes common LLVM install locations
+function getAugmentedEnv(): Record<string, string> {
+  const env = { ...process.env } as Record<string, string>;
+  const extraPaths: string[] = [];
+  if (process.platform === "win32") {
+    extraPaths.push("C:\\Program Files\\LLVM\\bin");
+    extraPaths.push("C:\\Program Files (x86)\\LLVM\\bin");
+  } else {
+    extraPaths.push("/usr/local/opt/llvm/bin");
+    extraPaths.push("/opt/homebrew/opt/llvm/bin");
+  }
+  env.PATH = [...extraPaths, env.PATH || ""].join(process.platform === "win32" ? ";" : ":");
+  return env;
+}
+
+function tryExec(cmd: string, timeout = 5000): string | null {
+  try {
+    return execSync(cmd, { encoding: "utf-8", timeout, env: getAugmentedEnv(), stdio: ["pipe", "pipe", "pipe"] });
+  } catch {
+    return null;
+  }
+}
+
 export async function detectToolchain(): Promise<ToolchainStatus> {
   const status: ToolchainStatus = {
     llc: { available: false },
@@ -67,38 +91,36 @@ export async function detectToolchain(): Promise<ToolchainStatus> {
   };
 
   // Check llc
-  try {
-    const llcOutput = execSync("llc --version 2>&1", { encoding: "utf-8", timeout: 5000 });
+  const llcOutput = tryExec("llc --version 2>&1");
+  if (llcOutput) {
     status.llc.available = true;
     const versionMatch = llcOutput.match(/LLVM version (\d+\.\d+\.\d+)/i)
       || llcOutput.match(/version (\d+\.\d+\.\d+)/i)
       || llcOutput.match(/(\d+\.\d+\.\d+)/);
     if (versionMatch) status.llc.version = versionMatch[1];
-    // Try to find path
-    try {
-      const whichCmd = process.platform === "win32" ? "where llc" : "which llc";
-      status.llc.path = execSync(whichCmd, { encoding: "utf-8", timeout: 3000 }).trim().split("\n")[0];
-    } catch { /* path detection optional */ }
-  } catch { /* llc not found */ }
+    const whichCmd = process.platform === "win32" ? "where llc" : "which llc";
+    const llcPath = tryExec(whichCmd, 3000);
+    if (llcPath) status.llc.path = llcPath.trim().split("\n")[0];
+  }
 
   // Check clang
-  try {
-    const clangOutput = execSync("clang --version 2>&1", { encoding: "utf-8", timeout: 5000 });
+  const clangOutput = tryExec("clang --version 2>&1");
+  if (clangOutput) {
     status.clang.available = true;
     const versionMatch = clangOutput.match(/clang version (\d+\.\d+\.\d+)/i)
       || clangOutput.match(/version (\d+\.\d+\.\d+)/i)
       || clangOutput.match(/(\d+\.\d+\.\d+)/);
     if (versionMatch) status.clang.version = versionMatch[1];
-    try {
-      const whichCmd = process.platform === "win32" ? "where clang" : "which clang";
-      status.clang.path = execSync(whichCmd, { encoding: "utf-8", timeout: 3000 }).trim().split("\n")[0];
-    } catch { /* path detection optional */ }
-  } catch { /* clang not found */ }
+    const whichCmd = process.platform === "win32" ? "where clang" : "which clang";
+    const clangPath = tryExec(whichCmd, 3000);
+    if (clangPath) status.clang.path = clangPath.trim().split("\n")[0];
+  }
 
   // Check runtime library
   const runtimePaths = [
     join(process.cwd(), "dist", "native", "libaether_runtime.a"),
     join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")), "..", "..", "..", "dist", "native", "libaether_runtime.a"),
+    join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")), "runtime", "libaether_runtime.a"),
   ];
   for (const p of runtimePaths) {
     if (existsSync(p)) {
@@ -229,7 +251,7 @@ export async function compileToBinary(options: CompilationOptions): Promise<Comp
   // Stage 4: Emit LLVM IR
   log("Stage 4: Emitting LLVM IR...");
   const { result: irResult, duration_ms: emitTime } = timeStage(() => {
-    const gen = new LLVMCodeGenerator({ parallel });
+    const gen = new LLVMCodeGenerator({ parallel, contractMode: options.contracts });
     const mod = gen.generateModule(graphJson);
     const text = gen.serialize(mod);
     return { mod, text };
@@ -257,13 +279,13 @@ export async function compileToBinary(options: CompilationOptions): Promise<Comp
     };
   }
 
-  // Stage 5: Compile to Object (requires llc)
+  // Stage 5: Compile to Object (requires llc or clang)
   log("Stage 5: Compiling to object...");
   const toolchain = await detectToolchain();
 
-  if (!toolchain.llc.available) {
-    errors.push("llc not found on PATH. Install LLVM: https://releases.llvm.org/download.html");
-    log("llc not found — stopping after IR generation");
+  if (!toolchain.llc.available && !toolchain.clang.available) {
+    errors.push("Neither llc nor clang found on PATH. Install LLVM: https://releases.llvm.org/download.html");
+    log("No compiler found — stopping after IR generation");
     return {
       success: false,
       stages: { validate: validateStage, typeCheck: typeCheckStage, verify: verifyStage, emitIR: emitIRStage },
@@ -272,22 +294,36 @@ export async function compileToBinary(options: CompilationOptions): Promise<Comp
     };
   }
 
-  const objPath = join(outputDir, `${name}.o`);
+  const objExt = process.platform === "win32" ? ".obj" : ".o";
+  const objPath = join(outputDir, `${name}${objExt}`);
   let compileObjStage: StageResult;
   try {
     const objStart = performance.now();
     const fileType = target === "assembly" ? "asm" : "obj";
     const outputExt = target === "assembly" ? join(outputDir, `${name}.s`) : objPath;
-    execSync(`llc -filetype=${fileType} -O${optimization} "${llPath}" -o "${outputExt}"`, {
-      encoding: "utf-8",
-      timeout: 60000,
-    });
+
+    const execEnv = getAugmentedEnv();
+    if (toolchain.llc.available) {
+      execSync(`llc -filetype=${fileType} -O${optimization} "${llPath}" -o "${outputExt}"`, {
+        encoding: "utf-8", timeout: 60000, env: execEnv,
+      });
+    } else {
+      if (target === "assembly") {
+        execSync(`clang -S -x ir -O${optimization} "${llPath}" -o "${outputExt}"`, {
+          encoding: "utf-8", timeout: 60000, env: execEnv,
+        });
+      } else {
+        execSync(`clang -c -x ir -O${optimization} "${llPath}" -o "${outputExt}"`, {
+          encoding: "utf-8", timeout: 60000, env: execEnv,
+        });
+      }
+    }
     const objTime = Math.round((performance.now() - objStart) * 100) / 100;
     compileObjStage = { success: true, duration_ms: objTime, outputPath: outputExt };
-    log(`Compile to ${fileType} OK (${objTime}ms)`);
+    log(`Compile to ${fileType} OK (${objTime}ms) [${toolchain.llc.available ? "llc" : "clang"}]`);
   } catch (e) {
     const msg = (e as Error).message;
-    errors.push(`llc failed: ${msg}`);
+    errors.push(`Compilation failed: ${msg}`);
     compileObjStage = { success: false, duration_ms: 0, errors: [msg] };
     return {
       success: false,
@@ -325,12 +361,47 @@ export async function compileToBinary(options: CompilationOptions): Promise<Comp
   let linkStage: StageResult;
   try {
     const linkStart = performance.now();
-    const runtimeDir = toolchain.runtime.path ? dirname(toolchain.runtime.path) : join(process.cwd(), "dist", "native");
-    let linkCmd = `clang "${objPath}" -L"${runtimeDir}" -laether_runtime -lpthread -o "${binaryPath}"`;
-    if (process.platform === "win32") {
-      linkCmd += " -lws2_32";
+    // Look for runtime lib in multiple locations
+    const runtimeSearchPaths = [
+      toolchain.runtime.path ? dirname(toolchain.runtime.path) : "",
+      join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")), "..", "..", "..", "dist", "native"),
+      join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")), "runtime"),
+      join(process.cwd(), "dist", "native"),
+    ].filter(Boolean);
+
+    let runtimeDir = runtimeSearchPaths.find(p => existsSync(join(p, "libaether_runtime.a"))) || runtimeSearchPaths[0];
+    const runtimeCSource = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1")), "runtime", "aether_runtime.c");
+
+    // If no static lib but C source exists, compile + link directly
+    let linkCmd: string;
+
+    // Collect C source files to compile alongside the object
+    const extraSources: string[] = [];
+
+    if (existsSync(runtimeCSource)) {
+      extraSources.push(`"${runtimeCSource}"`);
     }
-    execSync(linkCmd, { encoding: "utf-8", timeout: 60000 });
+
+    // Include stubs file if provided
+    if (options.stubsPath && existsSync(options.stubsPath)) {
+      extraSources.push(`"${options.stubsPath}"`);
+      log(`Including stubs: ${options.stubsPath}`);
+    }
+
+    if (extraSources.length > 0) {
+      // Compile source files directly alongside the object — most portable approach
+      const runtimeInclude = dirname(runtimeCSource);
+      linkCmd = `clang "${objPath}" ${extraSources.join(" ")} -I"${runtimeInclude}" -D_CRT_SECURE_NO_WARNINGS -o "${binaryPath}"`;
+    } else {
+      // Try linking against static library
+      linkCmd = `clang "${objPath}" -L"${runtimeDir}" -laether_runtime -o "${binaryPath}"`;
+    }
+
+    if (process.platform !== "win32") {
+      linkCmd += " -lpthread";
+    }
+
+    execSync(linkCmd, { encoding: "utf-8", timeout: 60000, env: getAugmentedEnv() });
     const linkTime = Math.round((performance.now() - linkStart) * 100) / 100;
     linkStage = { success: true, duration_ms: linkTime, outputPath: binaryPath };
     log(`Link OK (${linkTime}ms)`);

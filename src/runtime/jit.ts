@@ -1,8 +1,7 @@
 /**
- * AETHER Runtime — JIT Compiler
+ * AETHER Runtime — Runtime Code Generator
  *
- * Compiles hot subgraphs into optimized JavaScript functions that V8 can
- * then JIT-compile to native code. Eliminates:
+ * Compiles hot subgraphs into optimized JavaScript functions. Eliminates:
  * - Graph traversal overhead
  * - Dynamic input gathering via map lookups
  * - Wave scheduling overhead (flattened into sequential blocks)
@@ -33,7 +32,7 @@ export type CompiledGraphFunction = (
   log: string[];
 }>;
 
-export interface JITCompiledFunction {
+export interface CompiledFunction {
   id: string;
   sourceNodes: string[];
   fn: CompiledGraphFunction;
@@ -84,15 +83,15 @@ function generateDefault(type: TypeAnnotation): string {
   return '""';
 }
 
-// ─── JITCompiler ─────────────────────────────────────────────────────────────
+// ─── RuntimeCompiler ─────────────────────────────────────────────────────────────
 
-export class JITCompiler {
-  private cache: Map<string, JITCompiledFunction> = new Map();
+export class RuntimeCompiler {
+  private cache: Map<string, CompiledFunction> = new Map();
   private compilations: number = 0;
   private cacheHits: number = 0;
 
   /** Compile a subgraph into an optimized function at the specified tier */
-  compile(graph: AetherGraph, nodeIds: string[], tier: 1 | 2 = 2): JITCompiledFunction {
+  compile(graph: AetherGraph, nodeIds: string[], tier: 1 | 2 = 2): CompiledFunction {
     const hash = this.hashSubgraph(graph, nodeIds) + `_t${tier}`;
 
     const cached = this.cache.get(hash);
@@ -125,7 +124,7 @@ export class JITCompiler {
       }
     }
 
-    const compiled: JITCompiledFunction = {
+    const compiled: CompiledFunction = {
       id: hash,
       sourceNodes: nodeIds,
       fn,
@@ -146,7 +145,7 @@ export class JITCompiler {
   }
 
   /** Get cached compilation by subgraph hash */
-  getCached(nodeIds: string[]): JITCompiledFunction | null {
+  getCached(nodeIds: string[]): CompiledFunction | null {
     // We need the graph to compute hash, so search by node set
     for (const [, compiled] of this.cache) {
       const sortedA = [...compiled.sourceNodes].sort();
@@ -634,7 +633,7 @@ export class TierManager {
   }
 
   /** Promote a subgraph to the next tier */
-  promote(subgraphHash: string, compiler: JITCompiler, graph: AetherGraph, nodeIds: string[]): void {
+  promote(subgraphHash: string, compiler: RuntimeCompiler, graph: AetherGraph, nodeIds: string[]): void {
     if (this.blacklisted.has(subgraphHash)) return;
 
     const current = this.getTier(subgraphHash);
@@ -670,7 +669,7 @@ export class TierManager {
     }
   }
 
-  /** Check if a subgraph is blacklisted from JIT */
+  /** Check if a subgraph is blacklisted from compilation */
   isBlacklisted(subgraphHash: string): boolean {
     return this.blacklisted.has(subgraphHash);
   }

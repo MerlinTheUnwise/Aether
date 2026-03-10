@@ -39,8 +39,8 @@ describe("All Programs V2 — Recovery + Contracts + Confidence", () => {
       });
 
       it("contains node function definitions", () => {
-        expect(ir).toContain("define %");
-        expect(ir).toContain("@aether_");
+        expect(ir).toContain("define void @aether_");
+        expect(ir).toContain("sret(");
       });
 
       it("recovery nodes have setjmp-like patterns", () => {

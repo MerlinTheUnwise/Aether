@@ -4,7 +4,7 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execute, type ExecutionContext, type NodeFunction } from "../../src/runtime/executor.js";
 import { ExecutionProfiler } from "../../src/runtime/profiler.js";
-import { JITCompiler } from "../../src/runtime/jit.js";
+import { RuntimeCompiler } from "../../src/runtime/jit.js";
 import type { AetherGraph, AetherNode, TypeAnnotation } from "../../src/ir/validator.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -67,7 +67,7 @@ describe("JIT Executor Integration", () => {
   it("execute with JIT enabled after compilation uses compiled path", async () => {
     const graph = loadExample("user-registration");
     const profiler = new ExecutionProfiler(graph.id);
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
 
     // Pre-compile the whole graph
     const nodeIds = (graph as any).nodes.map((n: any) => n.id);
@@ -110,7 +110,7 @@ describe("JIT Executor Integration", () => {
       ]
     );
 
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     // Only compile first 2 nodes
     compiler.compile(graph, ["a", "b"]);
 
@@ -159,7 +159,7 @@ describe("JIT Executor Integration", () => {
     });
 
     // JIT execution (compile then run)
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
     const compiled = compiler.compile(graph, ["a", "b"]);
     const jitDirectResult = await compiled.fn(
       { val: 5 },
@@ -183,8 +183,8 @@ describe("JIT Executor Integration", () => {
       confidenceThreshold: 0.7,
     });
 
-    // JIT compiled
-    const compiler = new JITCompiler();
+    // Compiled
+    const compiler = new RuntimeCompiler();
     const nodeIds = (graph as any).nodes.map((n: any) => n.id);
     const compiled = compiler.compile(graph as any, nodeIds);
 
@@ -211,7 +211,7 @@ describe("JIT Executor Integration", () => {
     const graph = loadExample("user-registration");
     const profiler = new ExecutionProfiler(graph.id);
     profiler.setGraph(graph as any);
-    const compiler = new JITCompiler();
+    const compiler = new RuntimeCompiler();
 
     // Run enough times to trigger profiler recommendations
     for (let i = 0; i < 15; i++) {

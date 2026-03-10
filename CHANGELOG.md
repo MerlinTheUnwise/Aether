@@ -1,19 +1,81 @@
 # AETHER Changelog
 
+## Phase 6 — Complete (2026-03-09)
+
+Seven sessions addressing every weakness from independent review. Honest documentation, extended verification, real I/O, native compilation, deeper proofs, visual editor, and interactive demo.
+
+### Session 1: Honest Documentation
+- README, AETHERCLAUDE.md, and all docs rewritten for accuracy
+- "AI optimizer" renamed to "static graph optimizer"
+- "JIT" renamed to "runtime code generator"
+- "Proof-carrying" changed to "contract-verified"
+
+### Session 2: Z3 Gap Closure
+- Extended Z3 verifier with array theory, quantifiers, and set operations
+- Expressions previously returning "unsupported" now have Z3 coverage
+
+### Session 3: Real I/O Adapters
+- SQLite, real filesystem, and real HTTP service adapters
+- Adapter parity tests ensuring mock and real implementations match
+
+### Session 4: LLVM End-to-End Verification
+- Complete C runtime with contract checking, confidence gates, recovery
+- Full compilation pipeline: AETHER-IR → LLVM IR → object → binary
+- End-to-end tests: 7 programs compile and produce correct output
+
+### Session 5: Lean Proof Deepening
+- Tactic generator for automated proof completion
+- Over 50% of contracts fully proved (no `sorry`)
+
+### Session 6: Visual Graph Editor
+- Interactive browser-based graph editor (`src/editor/`)
+- Pan/zoom canvas, node drag, port-to-port edge connection
+- Dark theme, minimap, JSON export/import
+- CLI: `editor [path] [--output <p>] [--open]`
+
+### Session 7: Interactive Demo Application
+- Self-contained HTML demo (`src/demo/generate.ts`): describe → generate → validate → visualize → verify → execute
+- In-browser validator (schema, contracts, edges, DAG check, recovery, adversarial)
+- SVG visualization with wave layout, color coding, click-to-inspect
+- Verification simulation and execution simulation (wave scheduling, confidence propagation)
+- LLM generation via Anthropic API (browser-side, auto-fix loop)
+- 4 pre-built examples: user registration, payment processing, content moderation, ETL pipeline
+- CLI: `demo [--output <p>] [--open]`
+- **Tests:** 30 new tests (generate, validation, layout)
+
+### Totals
+- **1836 tests** across 126 test files
+- **32 CLI commands** covering the full lifecycle
+- Every criticism from independent review addressed
+
+---
+
+## Phase 5 — Complete (2026-03-09)
+
+Implementation registry, service container, real execution mode, expression evaluator, 16 program implementations, end-to-end workflows with real computation and in-memory services.
+
+---
+
+## Phase 4 — Complete (2026-03-09)
+
+LLVM native backend, C runtime, full compilation pipeline (validate → LLVM IR → object → binary), stub generator, benchmarking (interpreted vs compiled vs native).
+
+---
+
 ## Phase 3 — Complete (2026-03-09)
 
-Five sessions adding JIT compilation, AI-driven optimization, formal proofs, a verification dashboard, and a community package registry.
+Five sessions adding runtime code generation, static graph optimization, formal proofs, a verification dashboard, and a community package registry.
 
-### Session 1: JIT Compiler & Profiler
-- **Execution profiler** (`src/runtime/profiler.ts`) — per-node timing, hot path detection, JIT promotion recommendations
-- **JIT compiler** (`src/runtime/jit.ts`) — subgraph compilation to optimized async JavaScript via `AsyncFunction` constructor
+### Session 1: Runtime Code Generator & Profiler
+- **Execution profiler** (`src/runtime/profiler.ts`) — per-node timing, hot path detection, compilation recommendations
+- **Runtime code generator** (`src/runtime/jit.ts`) — subgraph compilation to optimized async JavaScript via `AsyncFunction` constructor
   - Confidence gates, effect reporting, and recovery inlined into generated code
   - Subgraph hashing (SHA-256) for cache deduplication
 - **Executor integration** — optional `jit` context with auto-compile above configurable threshold
 - **CLI commands:** `profile`, `jit`, `execute --jit`, `execute --profile`
 - **Tests:** profiler, compiler, executor integration, performance (39 new tests)
 
-### Session 2: Tiered Compilation & AI Optimizer
+### Session 2: Tiered Compilation & Static Graph Optimizer
 - **Tier manager** — Tier 0 (interpreted), Tier 1 (sequential compiled), Tier 2 (parallel compiled with contract inlining)
   - Auto-promotion based on execution count; deoptimization tracking with blacklist (3+ deopts = banned)
 - **Graph optimizer** (`src/compiler/optimizer.ts`) — 11 optimization types:

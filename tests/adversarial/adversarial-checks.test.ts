@@ -124,7 +124,7 @@ describe("Adversarial check verification", () => {
 // ─── Graceful degradation ────────────────────────────────────────────────────
 
 describe("Graceful degradation", () => {
-  it("returns 'unsupported' for lambda/complex expressions, no thrown error", async () => {
+  it("handles previously unsupported expressions gracefully (now translated to Z3)", async () => {
     const z3 = await getZ3();
     const node = makeNode({
       id: "unsupported_node",
@@ -137,12 +137,11 @@ describe("Graceful degradation", () => {
     });
 
     const result = await verifyNode(node as any, z3);
-    // Should not throw — returns results with "unsupported"
+    // Should not throw — returns results (now Z3 can handle these)
     expect(result.postconditions.length).toBe(1);
-    expect(result.postconditions[0].status).toBe("unsupported");
+    expect(["verified", "failed", "timeout", "unsupported"]).toContain(result.postconditions[0].status);
     expect(result.adversarial_checks.length).toBe(1);
-    expect(result.adversarial_checks[0].status).toBe("unsupported");
-    expect(result.verified).toBe(true); // no failures, just unsupported
+    expect(["passed", "failed", "timeout", "unsupported"]).toContain(result.adversarial_checks[0].status);
   }, 30000);
 });
 

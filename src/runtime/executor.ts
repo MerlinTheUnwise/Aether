@@ -14,7 +14,7 @@ import { ConfidenceEngine } from "./confidence.js";
 import { EffectTracker } from "./effects.js";
 import { extractScope, computeScopeOrder } from "../compiler/scopes.js";
 import type { ExecutionProfiler } from "./profiler.js";
-import type { JITCompiler } from "./jit.js";
+import type { RuntimeCompiler } from "./jit.js";
 import { checkContract, checkAdversarial, AdversarialViolation } from "./evaluator/checker.js";
 export { AdversarialViolation } from "./evaluator/checker.js";
 import type { ImplementationRegistry } from "../implementations/registry.js";
@@ -33,7 +33,7 @@ export interface ExecutionContext {
   onOversightRequired?: (node: string, confidence: number, context: any) => Promise<any>;
   onEffectExecuted?: (node: string, effect: string, detail: any) => void;
   jit?: {
-    compiler: JITCompiler;
+    compiler: RuntimeCompiler;
     profiler: ExecutionProfiler;
     autoCompile: boolean;
     compilationThreshold: number;
@@ -808,9 +808,9 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
   return result;
 }
 
-/** Find a cached JIT compilation that covers a given node */
+/** Find a cached compiled function that covers a given node */
 function findCachedCompilation(
-  compiler: JITCompiler,
+  compiler: RuntimeCompiler,
   nodeId: string,
   allNodeIds: string[]
 ): { fn: any; sourceNodes: string[] } | null {

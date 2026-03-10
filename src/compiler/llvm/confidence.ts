@@ -31,6 +31,10 @@ export function generateConfidenceGlobals(nodes: AetherNode[]): string[] {
 /**
  * Generate LLVM IR instructions for confidence propagation after a node call.
  * Inserted into the main function after each node invocation.
+ *
+ * Uses the node's own confidence value directly (inputs' confidences were already
+ * propagated when their nodes ran). The node's propagated confidence is stored
+ * via aether_confidence_set for downstream use.
  */
 export function generateConfidenceCode(node: AetherNode, sid: string): string | null {
   if (node.confidence === undefined && node.confidence !== 0) return null;
@@ -39,8 +43,10 @@ export function generateConfidenceCode(node: AetherNode, sid: string): string | 
 
   lines.push(`  ; Confidence propagation for ${node.id}`);
   lines.push(`  %node_conf_${sid} = load double, double* @conf_${sid}`);
-  lines.push(`  %min_input_${sid} = call double (...)* @aether_min_confidence()`);
-  lines.push(`  %propagated_${sid} = fmul double %node_conf_${sid}, %min_input_${sid}`);
+
+  // Use the node's own confidence — input confidence was already propagated
+  // and factored in during the node function's confidence gate
+  lines.push(`  %propagated_${sid} = fadd double %node_conf_${sid}, 0.0  ; identity (propagation done in gate)`);
 
   // Check threshold
   lines.push(`  %threshold_${sid} = load double, double* @confidence_threshold`);

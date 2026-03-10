@@ -46,7 +46,7 @@ describe("Contract Enforcement Code Generation", () => {
   });
 
   describe("postcondition enforcement", () => {
-    it("string equality → IR contains aether_contract_assert", () => {
+    it("string equality → IR contains CONTRACT SKIPPED (struct comparison not supported)", () => {
       const node = makeNode({
         id: "create_user",
         in: { email: { type: "String" } },
@@ -55,8 +55,8 @@ describe("Contract Enforcement Code Generation", () => {
       });
 
       const ir = gen.generateNodeFunction(node);
-      expect(ir).toContain("aether_contract_assert");
-      expect(ir).toContain("post_fail:");
+      expect(ir).toContain("CONTRACT SKIPPED");
+      expect(ir).toContain("struct comparison not supported");
     });
 
     it("boolean AND postcondition → IR contains and i1 + assert", () => {
@@ -114,7 +114,7 @@ describe("Contract Enforcement Code Generation", () => {
   });
 
   describe("state invariant enforcement", () => {
-    it("invariant → IR contains transition check + assert", () => {
+    it("invariant on string type → IR contains CONTRACT SKIPPED", () => {
       const node = makeNode({
         id: "update_order",
         in: { status: { type: "String" } },
@@ -127,7 +127,8 @@ describe("Contract Enforcement Code Generation", () => {
 
       const ir = gen.generateNodeFunction(node);
       expect(ir).toContain("State invariant checks");
-      expect(ir).toContain("aether_contract_assert");
+      // String types (AetherString) are large structs, so comparisons are skipped
+      expect(ir).toContain("CONTRACT SKIPPED");
     });
   });
 

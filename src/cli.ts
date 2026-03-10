@@ -56,11 +56,14 @@ Commands:
   verify <path>                  Run Z3 contract verifier
   transpile <path> [--output <dir>]  Generate JavaScript module
   report <path>                  Run ALL tools + summary dashboard
-  generate <path>                Validate AI-generated IR with actionable feedback
+  generate <path>                Validate generated IR with actionable feedback
   instantiate <path> --bindings <json>  Instantiate a template with bindings
   incremental                    Start interactive incremental builder
   compact <path> [--output <p>]  Convert IR JSON to compact .aether form
   execute <path> [--inputs <p>]  Execute graph in runtime engine
+                                  --mode mock|real  Service mode (default: mock)
+                                  --db-path <path>  SQLite database file (real mode)
+                                  --fs-path <path>  Filesystem sandbox base path (real mode)
   visualize <path> [--output <p>] [--execute] [--open]  Generate HTML visualization
   expand <path>                  Parse compact .aether form to IR JSON
   scope <path> <scope-id>        Extract and validate a single scope
@@ -69,17 +72,19 @@ Commands:
   resolve <path>                 Resolve intent nodes against certified library
   diff <path-v1> <path-v2>      Semantic diff between two graph versions
   profile <path> [--runs <N>]   Profile graph execution and show hot paths
-  jit <path> [--runs <N>] [--threshold <T>]  JIT compile and benchmark
+  jit <path> [--runs <N>] [--threshold <T>]  Compile hot subgraphs to optimized JS and benchmark
   dashboard <path> [--output <p>] [--open] [--execute] [--optimize] [--proofs]
                                    Generate verification dashboard HTML
-  export-proofs <path> [--output <p.lean>]  Export Lean 4 proof certificates
+  export-proofs <path> [--output <p.lean>]  Export Lean 4 proof skeletons
   emit-llvm <path> [--output <p.ll>]  Generate LLVM IR text file
   build-runtime [--check]          Build native C runtime library
   compile <path> [options]         Full native compilation pipeline
-  benchmark <path> [--runs <N>] [--native]  Benchmark interpreted vs JIT vs native
+  benchmark <path> [--runs <N>] [--native]  Benchmark interpreted vs compiled vs native
   toolchain                        Check LLVM toolchain status
   dashboard-diff <path-v1> <path-v2> [--output <p>] [--open]
                                    Diff two graph versions as HTML report
+  editor [path] [--output <p>] [--open]  Open interactive visual graph editor
+  demo [--output <p>] [--open]           Generate interactive demo HTML
 
 Registry:
   registry init                  Initialize local registry at ~/.aether/registry
@@ -735,7 +740,13 @@ async function cmdExecute(filePath: string, cliArgs: string[]): Promise<void> {
   const contractsArg = contractsIdx >= 0 ? cliArgs[contractsIdx + 1] : undefined;
   const failuresIdx = cliArgs.indexOf("--inject-failures");
   const failuresArg = failuresIdx >= 0 ? cliArgs[failuresIdx + 1] : undefined;
-  const useReal = cliArgs.includes("--real");
+  const modeIdx = cliArgs.indexOf("--mode");
+  const modeArg = modeIdx >= 0 ? cliArgs[modeIdx + 1] : undefined;
+  const dbPathIdx = cliArgs.indexOf("--db-path");
+  const dbPathArg = dbPathIdx >= 0 ? cliArgs[dbPathIdx + 1] : undefined;
+  const fsPathIdx = cliArgs.indexOf("--fs-path");
+  const fsPathArg = fsPathIdx >= 0 ? cliArgs[fsPathIdx + 1] : undefined;
+  const useReal = cliArgs.includes("--real") || modeArg === "real";
 
   let inputs: Record<string, any> = {};
   if (inputsPath) {
@@ -773,11 +784,26 @@ async function cmdExecute(filePath: string, cliArgs: string[]): Promise<void> {
       }
     }
 
+    // Build service config based on mode
+    const serviceConfig: any = {
+      database: seedData ? { seed: seedData } : undefined,
+      filesystem: filesystemFiles ? { files: filesystemFiles } : undefined,
+    };
+
+    // If --db-path or --fs-path specified, use real mode services
+    if (dbPathArg || fsPathArg) {
+      serviceConfig.mode = "real";
+      serviceConfig.real = {};
+      if (dbPathArg) {
+        serviceConfig.real.database = { path: dbPathArg };
+      }
+      if (fsPathArg) {
+        serviceConfig.real.filesystem = { basePath: fsPathArg };
+      }
+    }
+
     const ctx = await createExecutionContext(graph as any, inputs, {
-      serviceConfig: {
-        database: seedData ? { seed: seedData } : undefined,
-        filesystem: filesystemFiles ? { files: filesystemFiles } : undefined,
-      },
+      serviceConfig,
       contractMode,
     });
 
@@ -1451,18 +1477,18 @@ async function cmdProfile(filePath: string, runs: number): Promise<void> {
 async function cmdJIT(filePath: string, runs: number, threshold: number, optimize: boolean = false): Promise<void> {
   const { execute } = await import("./runtime/executor.js");
   const { ExecutionProfiler } = await import("./runtime/profiler.js");
-  const { JITCompiler } = await import("./runtime/jit.js");
+  const { RuntimeCompiler } = await import("./runtime/jit.js");
   let graph = loadGraph(filePath);
 
   const profiler = new ExecutionProfiler(graph.id);
   profiler.setGraph(graph as any);
-  const compiler = new JITCompiler();
+  const compiler = new RuntimeCompiler();
 
   const sep = "═══════════════════════════════════════════════════";
   const thin = "───────────────────────────────────────────────────";
 
   console.log(sep);
-  console.log(`AETHER JIT Report: ${graph.id} (v${graph.version})`);
+  console.log(`AETHER Compilation Report: ${graph.id} (v${graph.version})`);
   console.log(sep);
 
   // Phase 1: Profile
@@ -1557,11 +1583,11 @@ async function cmdJIT(filePath: string, runs: number, threshold: number, optimiz
 
   console.log("Performance:");
   console.log(`  Interpreted:  avg ${interpretedAvg.toFixed(1)}ms (${runs} runs)`);
-  console.log(`  JIT compiled: avg ${jitAvg.toFixed(1)}ms  (${runs} runs)`);
+  console.log(`  Compiled:     avg ${jitAvg.toFixed(1)}ms  (${runs} runs)`);
   if (speedup > 0) {
     console.log(`  Speedup:      ${speedup.toFixed(0)}% faster`);
   } else {
-    console.log(`  Speedup:      no improvement (graph too simple for JIT overhead to matter)`);
+    console.log(`  Speedup:      no improvement (graph too simple for compilation overhead to matter)`);
   }
   console.log(sep);
 }
@@ -2238,6 +2264,16 @@ if (__isCliMain) {
             return "abort" as const;
           })();
 
+          // Pre-generate stubs if requested so they can be linked
+          let compileStubsPath: string | undefined;
+          if (args.includes("--stubs") || args.includes("--harness")) {
+            const compileGraph = loadGraph(cliFilePath);
+            const stubCode = generateStubs(compileGraph as any);
+            const stubName = (compileName ?? compileGraph.id).replace(/[^a-zA-Z0-9]/g, "_");
+            compileStubsPath = join(compileOutputDir, `${stubName}_stubs.c`);
+            writeCompile(compileStubsPath, stubCode, "utf-8");
+          }
+
           const compileResult = await compileToBinary({
             input: cliFilePath,
             outputDir: compileOutputDir,
@@ -2247,6 +2283,7 @@ if (__isCliMain) {
             parallel: !args.includes("--no-parallel"),
             contracts: compileContracts,
             verbose: args.includes("--verbose"),
+            stubsPath: compileStubsPath,
           });
 
           console.log(compileSep);
@@ -2279,20 +2316,45 @@ if (__isCliMain) {
           }
           console.log(`  Result:       ${compileResult.success ? "SUCCESS" : "FAILED"}`);
 
-          // Generate stubs if requested
-          if (args.includes("--stubs") || args.includes("--harness")) {
+          // Report stubs/harness paths
+          if (compileStubsPath) {
+            console.log(`  Stubs:        ${compileStubsPath}`);
+          }
+          if (args.includes("--harness")) {
             const compileGraph = loadGraph(cliFilePath);
-            const stubCode = generateStubs(compileGraph as any);
-            const stubName = compileName ?? compileGraph.id;
-            const stubPath = join(compileOutputDir, `${stubName.replace(/[^a-zA-Z0-9]/g, "_")}_stubs.c`);
-            writeCompile(stubPath, stubCode, "utf-8");
-            console.log(`  Stubs:        ${stubPath}`);
+            const harnessCode = generateTestHarness(compileGraph as any);
+            const stubName = (compileName ?? compileGraph.id).replace(/[^a-zA-Z0-9]/g, "_");
+            const harnessPath = join(compileOutputDir, `${stubName}_harness.c`);
+            writeCompile(harnessPath, harnessCode, "utf-8");
+            console.log(`  Harness:      ${harnessPath}`);
+          }
 
-            if (args.includes("--harness")) {
-              const harnessCode = generateTestHarness(compileGraph as any);
-              const harnessPath = join(compileOutputDir, `${stubName.replace(/[^a-zA-Z0-9]/g, "_")}_harness.c`);
-              writeCompile(harnessPath, harnessCode, "utf-8");
-              console.log(`  Harness:      ${harnessPath}`);
+          // Run binary if requested
+          if (args.includes("--run") && compileResult.success && compileResult.outputPath.endsWith(".exe")) {
+            console.log(`  Running:      ${compileResult.outputPath}`);
+            try {
+              const { execSync: runExec } = await import("child_process");
+              const runOutput = runExec(`"${compileResult.outputPath}"`, {
+                encoding: "utf-8",
+                timeout: 30000,
+                stdio: ["pipe", "pipe", "pipe"],
+              });
+              if (runOutput.trim()) {
+                for (const line of runOutput.trim().split("\n")) {
+                  console.log(`  > ${line}`);
+                }
+              }
+              console.log(`  Exit:         0`);
+            } catch (runErr: any) {
+              const stderr = runErr.stderr?.trim();
+              const stdout = runErr.stdout?.trim();
+              if (stderr) {
+                for (const line of stderr.split("\n")) console.log(`  > ${line}`);
+              }
+              if (stdout) {
+                for (const line of stdout.split("\n")) console.log(`  > ${line}`);
+              }
+              console.log(`  Exit:         ${runErr.status ?? "error"}`);
             }
           }
 
@@ -2394,6 +2456,53 @@ if (__isCliMain) {
           console.log(toolchainSep);
           console.log(`  Status: ${ready ? "Ready for native compilation" : "Toolchain incomplete"}`);
           console.log(toolchainSep);
+          break;
+        }
+
+        case "editor": {
+          const { generateEditor } = await import("./editor/generate.js");
+          const { writeFileSync: writeEditor } = await import("fs");
+
+          const editorGraph = cliFilePath ? loadGraph(cliFilePath) : undefined;
+          const html = generateEditor(editorGraph as any);
+
+          const editorOutputIdx = args.indexOf("--output");
+          const editorOutputPath = editorOutputIdx >= 0 && args[editorOutputIdx + 1]
+            ? args[editorOutputIdx + 1]
+            : `${editorGraph?.id || "aether"}-editor.html`;
+
+          writeEditor(editorOutputPath, html, "utf-8");
+          console.log(`✓ Editor written to ${editorOutputPath}`);
+
+          if (args.includes("--open")) {
+            const { exec } = await import("child_process");
+            const platform = process.platform;
+            const cmd = platform === "win32" ? "start" : platform === "darwin" ? "open" : "xdg-open";
+            exec(`${cmd} "${editorOutputPath}"`);
+          }
+          break;
+        }
+
+        case "demo": {
+          const { generateDemo } = await import("./demo/generate.js");
+          const { writeFileSync: writeDemo } = await import("fs");
+
+          const html = generateDemo();
+
+          const demoOutputIdx = args.indexOf("--output");
+          const demoOutputPath = demoOutputIdx >= 0 && args[demoOutputIdx + 1]
+            ? args[demoOutputIdx + 1]
+            : "aether-demo.html";
+
+          writeDemo(demoOutputPath, html, "utf-8");
+          console.log(`✓ Demo written to ${demoOutputPath}`);
+
+          if (args.includes("--open")) {
+            const { exec } = await import("child_process");
+            const platform = process.platform;
+            const cmd = platform === "win32" ? "start" : platform === "darwin" ? "open" : "xdg-open";
+            exec(`${cmd} "${demoOutputPath}"`);
+          }
           break;
         }
 

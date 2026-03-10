@@ -47,7 +47,13 @@ const BASE_TYPE_MAP: Record<string, { llvmType: string; byteSize: number; alignm
   Float64: { llvmType: "double", byteSize: 8, alignment: 8 },
   Float32: { llvmType: "float",  byteSize: 4, alignment: 4 },
   Decimal: { llvmType: "double", byteSize: 8, alignment: 8 },
-  String:  { llvmType: "%String*", byteSize: 8, alignment: 8 },
+  String:  { llvmType: "%AetherString", byteSize: 16, alignment: 8 },
+  // Common semantic types — all represented as opaque pointers at native level
+  Email:   { llvmType: "%AetherString", byteSize: 16, alignment: 8 },
+  URL:     { llvmType: "%AetherString", byteSize: 16, alignment: 8 },
+  JSON:    { llvmType: "%AetherString", byteSize: 16, alignment: 8 },
+  UUID:    { llvmType: "%AetherString", byteSize: 16, alignment: 8 },
+  Void:    { llvmType: "void",   byteSize: 0, alignment: 0 },
 };
 
 // ─── Type Mapper ──────────────────────────────────────────────────────────────
@@ -92,11 +98,11 @@ export function mapTypeToLLVM(annotation: TypeAnnotation): LLVMTypeMapping {
     };
   }
 
-  // Any other type is treated as a named record/struct pointer
-  const safeName = aetherType.replace(/[^a-zA-Z0-9_]/g, "_");
+  // Any other type is treated as an opaque pointer (i8*)
+  // Domain types (User, Order, Payment, etc.) are opaque at the native level
   return {
     aetherType,
-    llvmType: `%${safeName}*`,
+    llvmType: "i8*",
     byteSize: 8,
     alignment: 8,
   };

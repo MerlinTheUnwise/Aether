@@ -1,6 +1,8 @@
 # Scopes & Multi-Agent Collaboration
 
 > How to decompose programs into scopes, define boundary contracts, and orchestrate multi-agent collaboration.
+>
+> **Note:** Multi-agent collaboration is simulated within a single process. No distributed execution capability exists.
 
 ## When to Use Scopes
 

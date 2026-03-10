@@ -41,11 +41,11 @@ describe("LLVM Confidence Tracking", () => {
   });
 
   describe("Confidence code generation", () => {
-    it("generates fmul multiplication instruction", () => {
+    it("generates confidence propagation instruction", () => {
       const node = makeNode({ id: "validate", confidence: 0.99 });
       const code = generateConfidenceCode(node, "validate");
       expect(code).not.toBeNull();
-      expect(code).toContain("fmul double");
+      expect(code).toContain("fadd double");
     });
 
     it("generates fcmp threshold comparison", () => {
@@ -66,10 +66,11 @@ describe("LLVM Confidence Tracking", () => {
       expect(code).toContain("load double, double* @conf_process");
     });
 
-    it("calls min_confidence runtime helper", () => {
+    it("generates threshold comparison", () => {
       const node = makeNode({ id: "merge", confidence: 0.80 });
       const code = generateConfidenceCode(node, "merge");
-      expect(code).toContain("aether_min_confidence");
+      expect(code).toContain("fcmp olt double");
+      expect(code).toContain("confidence_threshold");
     });
   });
 

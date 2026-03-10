@@ -235,12 +235,22 @@ describe("Codegen-Runtime Integration", () => {
       }
     });
 
-    it("runtime declarations match C signatures", () => {
+    it("runtime declarations match C signatures with MSVC ABI", () => {
       const sigs = getRuntimeSignatures();
       for (const sig of sigs) {
-        const paramStr = sig.params.join(", ");
-        const declPattern = `declare ${sig.returnType} @${sig.name}(${paramStr})`;
-        expect(text).toContain(declPattern);
+        // Large struct returns use sret pattern
+        const isLargeReturn = sig.returnType.startsWith("%") && !sig.returnType.includes("*");
+        const abiParams = sig.params.map(p => (p.startsWith("%") && !p.includes("*")) ? `${p}*` : p);
+        if (isLargeReturn) {
+          const sretParam = `${sig.returnType}* sret(${sig.returnType})`;
+          const paramStr = [sretParam, ...abiParams].join(", ");
+          const declPattern = `declare void @${sig.name}(${paramStr})`;
+          expect(text).toContain(declPattern);
+        } else {
+          const paramStr = abiParams.join(", ");
+          const declPattern = `declare ${sig.returnType} @${sig.name}(${paramStr})`;
+          expect(text).toContain(declPattern);
+        }
       }
     });
 

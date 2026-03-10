@@ -3,7 +3,7 @@
  *
  * Compares performance across three execution modes:
  * - Interpreted (graph executor in stub mode)
- * - JIT (executor with JIT enabled)
+ * - Compiled (executor with runtime compilation enabled)
  * - Native (compiled binary, if toolchain available)
  */
 
@@ -11,7 +11,7 @@ import { readFileSync } from "fs";
 import { execSync } from "child_process";
 import { execute, type ExecutionContext } from "../../runtime/executor.js";
 import { ExecutionProfiler } from "../../runtime/profiler.js";
-import { JITCompiler } from "../../runtime/jit.js";
+import { RuntimeCompiler } from "../../runtime/jit.js";
 import { detectToolchain, compileToBinary } from "./pipeline.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export async function benchmark(
 
   // JIT warmup: profile + compile
   const profiler = new ExecutionProfiler(graphId);
-  const jitCompiler = new JITCompiler();
+  const jitCompiler = new RuntimeCompiler();
 
   for (let i = 0; i < warmupRuns; i++) {
     const ctx = makeContext();

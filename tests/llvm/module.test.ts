@@ -21,7 +21,7 @@ describe("LLVM Module Generation", () => {
         const nodes = graph.nodes.filter((n: any) => !n.intent && !n.hole);
         for (const node of nodes) {
           const sid = node.id.replace(/[^a-zA-Z0-9_]/g, "_");
-          expect(text).toContain(`define %${sid}_out @aether_${sid}`);
+          expect(text).toContain(`define void @aether_${sid}(%${sid}_out* sret(%${sid}_out) %sret_ptr, %${sid}_in* %inputs_ptr)`);
         }
       });
 

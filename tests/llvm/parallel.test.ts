@@ -149,7 +149,7 @@ describe("Parallel Native Execution", () => {
       const text = gen.serialize(mod);
 
       // Pool is initialized but never used (no multi-node waves)
-      expect(text).toContain("call %solo_out @aether_solo");
+      expect(text).toContain("call void @aether_solo(%solo_out* sret(%solo_out)");
       // No task wrappers generated
       expect(text).not.toContain("@task_solo");
     });
@@ -161,7 +161,7 @@ describe("Parallel Native Execution", () => {
       const text = gen.serialize(mod);
 
       // node_c is called directly (not via pool_submit)
-      expect(text).toContain("call %node_c_out @aether_node_c");
+      expect(text).toContain("call void @aether_node_c(%node_c_out* sret(%node_c_out)");
     });
   });
 
@@ -202,9 +202,9 @@ describe("Parallel Native Execution", () => {
       expect(mainFn).not.toContain("aether_pool_new");
       expect(mainFn).not.toContain("aether_pool_wait_all");
       // Direct calls for all nodes
-      expect(mainFn).toContain("call %node_a_out @aether_node_a");
-      expect(mainFn).toContain("call %node_b_out @aether_node_b");
-      expect(mainFn).toContain("call %node_c_out @aether_node_c");
+      expect(mainFn).toContain("call void @aether_node_a(%node_a_out* sret(%node_a_out)");
+      expect(mainFn).toContain("call void @aether_node_b(%node_b_out* sret(%node_b_out)");
+      expect(mainFn).toContain("call void @aether_node_c(%node_c_out* sret(%node_c_out)");
       // Main says sequential
       expect(text).toContain("sequential");
     });
@@ -226,7 +226,7 @@ describe("Parallel Native Execution", () => {
       const mod = gen.generateModule(graph);
       const text = gen.serialize(mod);
 
-      expect(text).toContain("aether_arena_new(i64 2097152)");
+      expect(text).toContain("aether_arena_new(%AetherArena* sret(%AetherArena) %arena, i64 2097152)");
     });
 
     it("execution logging disabled in main function", () => {

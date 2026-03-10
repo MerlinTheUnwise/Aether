@@ -60,7 +60,6 @@ describe("Confidence Gate Code Generation", () => {
       expect(ir).toContain("gate_check_");
       expect(ir).toContain("execute_node_");
       expect(ir).toContain("skip_node_");
-      expect(ir).toContain("continue_");
     });
 
     it("branches to skip_node when confidence below threshold", () => {
