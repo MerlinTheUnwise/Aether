@@ -60,7 +60,7 @@ export class ServiceContainer {
     return this.services.has(name);
   }
 
-  static createDefault(config?: ServiceContainerConfig): ServiceContainer {
+  static async createDefault(config?: ServiceContainerConfig): Promise<ServiceContainer> {
     const mode = config?.mode ?? "mock";
 
     if (mode === "real") {
@@ -113,16 +113,16 @@ export class ServiceContainer {
     return container;
   }
 
-  private static createReal(config: ServiceContainerConfig): ServiceContainer {
+  private static async createReal(config: ServiceContainerConfig): Promise<ServiceContainer> {
     const container = new ServiceContainer();
     const realConfig = config.real ?? {};
 
-    // Database — SQLite
+    // Database — SQLite (sql.js, pure WASM)
     const dbPath = realConfig.database?.path ?? ":memory:";
     const db = new SQLiteDatabaseAdapter(dbPath);
     if (config.database?.seed) {
       for (const [table, records] of Object.entries(config.database.seed)) {
-        db.seed(table, records);
+        await db.seed(table, records);
       }
     }
     container.register("database", db);

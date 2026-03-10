@@ -1,13 +1,13 @@
 /**
- * Tests for SQLite Database Adapter
+ * Tests for SQLite Database Adapter (sql.js — pure WASM, no native deps)
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { SQLiteDatabaseAdapter, isSQLiteAvailable } from "../../src/implementations/services/database-sqlite.js";
+import { SQLiteDatabaseAdapter } from "../../src/implementations/services/database-sqlite.js";
 import { existsSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 
-describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
+describe("SQLiteDatabaseAdapter", () => {
   const testDbs: SQLiteDatabaseAdapter[] = [];
 
   function createDb(path?: string): SQLiteDatabaseAdapter {
@@ -68,7 +68,7 @@ describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
 
   it("seed data → queryable", async () => {
     const db = createDb();
-    db.seed("products", [
+    await db.seed("products", [
       { id: "p1", name: "Widget", price: 10 },
       { id: "p2", name: "Gadget", price: 25 },
       { id: "p3", name: "Gizmo", price: 15 },
@@ -80,7 +80,7 @@ describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
 
   it("count → correct", async () => {
     const db = createDb();
-    db.seed("items", [
+    await db.seed("items", [
       { id: "i1", category: "A" },
       { id: "i2", category: "B" },
       { id: "i3", category: "A" },
@@ -92,7 +92,7 @@ describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
 
   it("all 9 query operators work correctly", async () => {
     const db = createDb();
-    db.seed("data", [
+    await db.seed("data", [
       { id: "d1", name: "alpha", value: 10 },
       { id: "d2", name: "beta", value: 20 },
       { id: "d3", name: "gamma", value: 30 },
@@ -137,7 +137,7 @@ describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
 
     const db1 = new SQLiteDatabaseAdapter(dbFile);
     await db1.create("users", { id: "u1", name: "Alice", age: 30 });
-    db1.close();
+    db1.close(); // close auto-saves to file
 
     const db2 = createDb(dbFile);
     const read = await db2.read("users", "u1");
@@ -153,7 +153,7 @@ describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
 
   it("exists → returns boolean correctly", async () => {
     const db = createDb();
-    db.seed("items", [{ id: "i1", status: "active" }, { id: "i2", status: "inactive" }]);
+    await db.seed("items", [{ id: "i1", status: "active" }, { id: "i2", status: "inactive" }]);
 
     expect(await db.exists("items", { field: "status", operator: "=", value: "active" })).toBe(true);
     expect(await db.exists("items", { field: "status", operator: "=", value: "deleted" })).toBe(false);
@@ -179,7 +179,7 @@ describe.skipIf(!isSQLiteAvailable)("SQLiteDatabaseAdapter", () => {
 
   it("update nonexistent record → throws", async () => {
     const db = createDb();
-    db.seed("users", [{ id: "u1", name: "Alice" }]);
+    await db.seed("users", [{ id: "u1", name: "Alice" }]);
     await expect(db.update("users", "u99", { name: "Nobody" }))
       .rejects.toThrow("not found");
   });

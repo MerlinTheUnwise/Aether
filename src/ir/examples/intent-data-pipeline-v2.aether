@@ -13,6 +13,8 @@ graph daily-report v2
     in:  query: String
     out: transactions: List<Transaction>
     effects: [database.read]
+    axioms:
+      output.transactions != null
     contracts:
       pre:  input.query != null
       post: output.transactions != null
@@ -23,6 +25,9 @@ graph daily-report v2
   node validate_dates
     in:  transactions: List<Transaction>
     out: validated: List<Transaction>, invalid_count: Number
+    axioms:
+      output.validated != null
+      output.invalid_count >= 0
     contracts:
       pre:  input.transactions != null
       post: output.validated != null
@@ -65,6 +70,9 @@ graph daily-report v2
     in:  total: Numeric, transactions: List<Transaction>
     out: report: String, summary: String
     effects: [logging]
+    axioms:
+      output.report != null
+      output.report.length > 0
     contracts:
       pre:  input.total != null
       pre:  input.transactions != null
@@ -78,6 +86,8 @@ graph daily-report v2
     in:  report: String
     out: sent: Bool
     effects: [email]
+    axioms:
+      output.sent = true
     contracts:
       pre:  input.report != null
       post: output.sent == true

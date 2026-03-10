@@ -1,49 +1,56 @@
 /**
- * Tests for SQLite optional dependency handling.
+ * Tests for SQLite dependency — verifies sql.js (pure WASM) is used instead of native deps.
  */
 
 import { describe, it, expect } from "vitest";
+import { readdirSync, readFileSync, statSync } from "fs";
+import { join } from "path";
 
-describe("SQLite optional dependency", () => {
-  it("database-sqlite.ts exports isSQLiteAvailable flag", async () => {
-    const mod = await import("../../src/implementations/services/database-sqlite.js");
-    expect(typeof mod.isSQLiteAvailable).toBe("boolean");
-  });
+function collectTsFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      results.push(...collectTsFiles(full));
+    } else if (entry.endsWith(".ts")) {
+      results.push(full);
+    }
+  }
+  return results;
+}
 
-  it("SQLiteDatabaseAdapter is a class regardless of availability", async () => {
+describe("SQLite dependency (sql.js)", () => {
+  it("database-sqlite.ts exports SQLiteDatabaseAdapter class", async () => {
     const mod = await import("../../src/implementations/services/database-sqlite.js");
     expect(typeof mod.SQLiteDatabaseAdapter).toBe("function");
   });
 
-  it("all SQLite test files are properly gated with skipIf", async () => {
-    const { readFileSync } = await import("fs");
-    const { join } = await import("path");
+  it("SQLiteDatabaseAdapter works without native compilation", async () => {
+    const { SQLiteDatabaseAdapter } = await import("../../src/implementations/services/database-sqlite.js");
+    const db = new SQLiteDatabaseAdapter();
+    const { id } = await db.create("test", { name: "works" });
+    const read = await db.read("test", id);
+    expect(read!.name).toBe("works");
+    db.close();
+  });
 
-    const testFiles = [
-      "tests/services/database-sqlite.test.ts",
-      "tests/services/adapter-parity.test.ts",
-      "tests/services/real-execution.test.ts",
-    ];
-
-    for (const file of testFiles) {
-      const content = readFileSync(join(process.cwd(), file), "utf-8");
+  it("no better-sqlite3 imports anywhere in src/", () => {
+    const srcDir = join(process.cwd(), "src");
+    const files = collectTsFiles(srcDir);
+    for (const file of files) {
+      const content = readFileSync(file, "utf-8");
+      const relative = file.replace(process.cwd() + "\\", "").replace(process.cwd() + "/", "");
       expect(
-        content.includes("isSQLiteAvailable"),
-        `${file} should import and use isSQLiteAvailable for gating`
-      ).toBe(true);
-      expect(
-        content.includes("skipIf"),
-        `${file} should use skipIf to gate SQLite tests`
-      ).toBe(true);
+        content.includes("better-sqlite3"),
+        `${relative} should not reference better-sqlite3`
+      ).toBe(false);
     }
   });
 
-  it("better-sqlite3 is in optionalDependencies, not dependencies", async () => {
-    const { readFileSync } = await import("fs");
-    const { join } = await import("path");
+  it("sql.js is in dependencies (not optionalDependencies)", () => {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf-8"));
-
-    expect(pkg.optionalDependencies?.["better-sqlite3"]).toBeDefined();
+    expect(pkg.dependencies?.["sql.js"]).toBeDefined();
     expect(pkg.dependencies?.["better-sqlite3"]).toBeUndefined();
+    expect(pkg.optionalDependencies?.["better-sqlite3"]).toBeUndefined();
   });
 });

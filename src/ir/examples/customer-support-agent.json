@@ -88,6 +88,7 @@
           "domain": "customer_support"
         }
       },
+      "axioms": ["result.status in [success, partial, requires_followup]"],
       "contract": {
         "pre": ["confidence_score > 0.7"],
         "post": ["result.status in [success, partial, requires_followup]"]

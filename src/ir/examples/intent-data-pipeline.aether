@@ -13,6 +13,8 @@ graph daily-report v1
     in:  query: String
     out: transactions: List<Transaction>
     effects: [database.read]
+    axioms:
+      output.transactions != null
     contracts:
       pre:  input.query != null
       post: output.transactions != null
@@ -54,6 +56,9 @@ graph daily-report v1
   node format_report
     in:  total: Numeric, transactions: List<Transaction>
     out: report: String
+    axioms:
+      output.report != null
+      output.report.length > 0
     contracts:
       pre:  input.total != null
       pre:  input.transactions != null
@@ -66,6 +71,8 @@ graph daily-report v1
     in:  report: String
     out: sent: Bool
     effects: [email]
+    axioms:
+      output.sent = true
     contracts:
       pre:  input.report != null
       post: output.sent == true

@@ -169,6 +169,33 @@ When verification is undecidable, too expensive, or the domain is genuinely unce
 
 **When NOT to use:** Don't use supervised blocks to avoid writing contracts. If a contract can be written and verified, it should be. Supervised is the honest escape hatch, not a shortcut.
 
+## Verification Reality
+
+Z3 translates 93% of contract expressions to its internal AST — but translating to Z3 is not the same as proving.
+
+### What Z3 CAN Prove
+- **Contradictions** — a postcondition that contradicts itself is caught
+- **Simple arithmetic** — `x + y > 0` where x, y are unconstrained integers
+- **Boolean logic** — `a ∧ ¬a` is UNSAT (contradiction detected)
+- **Chained comparisons** — `0 ≤ x ≤ 100` range constraints
+
+### What Z3 CANNOT Prove
+- **Anything about opaque implementations** — Z3 sees contracts but not node code. It cannot verify that `normalize(email)` produces lowercase output. Most postconditions reference implementation behavior, which is why the formal proof rate is ~1% (1/113 postconditions across reference programs).
+- **Complex predicates** — quantified statements, set operations, and lambda expressions
+- **Semantic properties** — "output is sorted" requires knowing the implementation
+
+### What the Runtime Evaluator Covers
+The expression evaluator (`src/runtime/evaluator/`) checks 100% of contract expressions at runtime. Every postcondition that Z3 can't prove is enforced at execution time against actual outputs. This is the real safety net — not Z3.
+
+### Honest Proof Rate on Reference Programs
+- Total postconditions: 113
+- Z3 proved (UNSAT): 1 (0.9%)
+- Z3 found counterexample (SAT): 104
+- Z3 couldn't translate: 8
+- Runtime evaluator covers: 100%
+
+The high SAT (counterexample) count is expected: Z3 treats node implementations as opaque, so from Z3's perspective any output is possible, making most postconditions falsifiable.
+
 ## Verification Percentage
 
 ```

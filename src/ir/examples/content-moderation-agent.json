@@ -32,6 +32,7 @@
           "range": [0.0, 1.0]
         }
       },
+      "axioms": ["classification_confidence >= 0", "classification_confidence <= 1"],
       "contract": {
         "post": ["classification_confidence >= 0", "classification_confidence <= 1"]
       },
@@ -80,6 +81,7 @@
           "range": [0.0, 1.0]
         }
       },
+      "axioms": ["combined_confidence >= 0", "combined_confidence <= 1"],
       "contract": {
         "post": ["combined_confidence >= 0", "combined_confidence <= 1"]
       },
@@ -127,6 +129,7 @@
           "range": [0.0, 1.0]
         }
       },
+      "axioms": ["decision_confidence >= 0", "decision_confidence <= 1"],
       "contract": {
         "post": ["decision_confidence >= 0", "decision_confidence <= 1"],
         "invariants": ["never(moderation_action == auto_remove ∧ combined_confidence < 0.9)", "never(moderation_action == ban_user ∧ requires_human_review == false)"]
@@ -171,6 +174,7 @@
           "type": "Bool"
         }
       },
+      "axioms": ["success = true"],
       "contract": {
         "pre": ["decision_confidence > 0"],
         "post": ["success == true"]
@@ -204,6 +208,7 @@
           "type": "Bool"
         }
       },
+      "axioms": ["logged = true"],
       "contract": {
         "post": ["logged == true"]
       },

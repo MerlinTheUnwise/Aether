@@ -27,34 +27,38 @@ contracts, effects, uncertainty, and failure handling.
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| IR schema + validator | Production-ready | JSON Schema, 7 validation rules, DAG check |
-| Semantic type checker | Production-ready | 6-dimension type compatibility (domain, unit, sensitivity, etc.) |
-| Z3 contract verifier | Production-ready | Arithmetic, boolean, comparisons, implication. See Known Limitations for coverage gaps |
-| Interpreted executor | Production-ready | Wave-based parallel scheduling, confidence gating, recovery |
-| Compiled optimization | Production-ready | Compiles hot subgraphs to optimized JavaScript functions (Tier 0/1/2) |
-| Static graph optimizer | Production-ready | 11 rule-based analysis passes (merge, parallelize, eliminate, etc.) |
-| Real execution mode | Production-ready | 16 programs with real computation logic and in-memory service simulation |
-| Compact form | Production-ready | `.aether` text format, 60-70% smaller, round-trip guaranteed |
-| Verification dashboard | Production-ready | Self-contained HTML with per-node verification breakdown |
-| Interactive demo | Production-ready | Browser-based pipeline: describe → generate → validate → visualize → verify → execute |
-| Visual graph editor | Production-ready | Browser-based interactive DAG editor with drag, zoom, port connection |
-| Local package registry | Production-ready | Semver dependency resolution, 10 published stdlib packages |
+| IR schema + validator | Feature-complete and tested | JSON Schema, 7 validation rules, DAG check |
+| Semantic type checker | Feature-complete and tested | 6-dimension type compatibility (domain, unit, sensitivity, etc.) |
+| Z3 contract verifier | Working | Translates 93% of contract expressions to Z3 AST, formally proves ~78% of postconditions (with implementation axioms). See Known Limitations |
+| Interpreted executor | Feature-complete and tested | Wave-based parallel scheduling, confidence gating, recovery |
+| Compiled optimization | Feature-complete and tested | Compiles hot subgraphs to optimized JavaScript functions (Tier 0/1/2) |
+| Static graph optimizer | Feature-complete and tested | 11 rule-based analysis passes (merge, parallelize, eliminate, etc.) |
+| Real execution mode | Feature-complete and tested | 17 programs with real computation logic and in-memory service simulation |
+| Compact form | Feature-complete and tested | `.aether` text format, 60-70% smaller, round-trip guaranteed |
+| Verification dashboard | Feature-complete and tested | Self-contained HTML with per-node verification breakdown |
+| Interactive demo | Feature-complete and tested | Browser-based pipeline: describe → generate → validate → visualize → verify → execute |
+| Visual graph editor | Feature-complete and tested | Browser-based interactive DAG editor with drag, zoom, port connection |
+| Local package registry | Feature-complete and tested | Semver dependency resolution, 10 published stdlib packages |
 
 ## What's Experimental
 
 | Feature | Status | What Works | What Doesn't |
 |---------|--------|------------|-------------|
-| LLVM native backend | Experimental | LLVM IR generation, C runtime header | End-to-end compilation to running binaries not verified in test suite |
-| Lean 4 proof export | Experimental | Proof skeletons with type mappings | Most non-trivial contracts produce `sorry` placeholders requiring manual completion |
+| LLVM native backend | Experimental | LLVM IR generation with experimental binary compilation (requires clang) | End-to-end compilation to running binaries not verified in test suite |
+| Lean 4 proof export | Experimental | Generates proof skeletons for 74% of contracts, most with sorry placeholders | Never verified by an actual Lean 4 compiler |
 | Multi-agent collaboration | Simulated | Protocol, scope assignment, integration checks | Single-process simulation only, no distributed execution |
 
 ## Quick Start
 
 ```bash
-npm install
-npm run typecheck
-npm test
+git clone https://github.com/MerlinTheUnwise/Aether
+cd Aether
+npm install          # No native dependencies — works on any OS with Node.js 18+
+npm run typecheck    # Verify TypeScript
+npm test             # Run all tests
 ```
+
+**Requirements:** Node.js 18+ (for native fetch). No Python, C++ compiler, or platform-specific tools needed.
 
 ### Core Pipeline
 
@@ -124,7 +128,7 @@ npx tsx src/cli.ts collaborate src/ir/examples/multi-agent-marketplace.json
 
 ## Reference Programs
 
-16 example programs in `src/ir/examples/`:
+17 example programs in `src/ir/examples/`:
 
 | Program | Nodes | Key Features |
 |---------|-------|-------------|
@@ -144,8 +148,9 @@ npx tsx src/cli.ts collaborate src/ir/examples/multi-agent-marketplace.json
 | `intent-data-pipeline-v2` | 7 | Version evolution, semantic diff target |
 | `real-world/sales-analytics` | 10 | 500-row CSV pipeline: validate → deduplicate → anomaly detect → analytics → report → archive → email |
 | `real-world/api-orchestration` | 7 | E-commerce order flow: auth → inventory → payment → order → shipment → email → response |
+| `real-world/transaction-analysis` | 5 | Financial transaction analysis pipeline |
 
-The two `real-world/` programs have real computation logic (sorts actually sort, aggregations actually sum). All service I/O (database, filesystem, email) is in-memory simulation.
+The three `real-world/` programs have real computation logic (sorts actually sort, aggregations actually sum). All service I/O (database, filesystem, email) is in-memory simulation.
 
 ## Project Structure
 
@@ -154,7 +159,7 @@ src/
   ir/
     schema.json              # JSON Schema for AetherGraph
     validator.ts             # Structural validator (7 rules + IntentNode + StateType)
-    examples/                # 16 reference programs
+    examples/                # 17 reference programs (.json + .aether)
   compiler/
     checker.ts               # Semantic type checker
     verifier.ts              # Z3 contract verifier + state type invariants
@@ -192,6 +197,7 @@ src/
     services/
       container.ts           # Service container (dependency injection)
       database.ts            # In-memory database with query/create/update
+      database-sqlite.ts     # SQLite adapter (sql.js WASM — no native deps)
       filesystem.ts          # In-memory filesystem with CSV support
       email.ts               # Email service (capture mode for testing)
       ml.ts                  # ML service (rule-based anomaly detection)
@@ -217,10 +223,10 @@ src/
   stdlib/
     certified/               # 6 verified algorithms
     patterns/                # 4 reusable templates
-  cli.ts                     # Unified CLI (32 commands)
+  cli.ts                     # Unified CLI (43 commands)
 docs/                        # 9 reference documents
 spec/                        # 5 formal specifications
-tests/                       # 126 test files, 1836 tests
+tests/                       # 165 test files, ~1,669 it() blocks
 test-data/                   # Seed data and inputs for real-world programs
 ```
 
@@ -235,7 +241,7 @@ Documentation is in [`docs/`](docs/index.md):
 | [Type System](docs/type-system.md) | Semantic types, state machines |
 | [Contracts & Verification](docs/contracts.md) | Contract expressions, Z3 verification |
 | [Patterns Cookbook](docs/patterns.md) | 14 IR patterns to copy and adapt |
-| [CLI Reference](docs/cli-reference.md) | All 32 commands with flags |
+| [CLI Reference](docs/cli-reference.md) | All 43 commands with flags |
 | [Scopes & Collaboration](docs/collaboration.md) | Context-scoped loading, multi-agent protocol (single-process simulation) |
 | [Native Compilation](docs/native-compilation.md) | LLVM backend (experimental), C runtime, benchmarking |
 
@@ -253,17 +259,41 @@ The nine pillars are real design principles enforced throughout the toolchain �
 8. **Incremental-Verifiable** — Each node validated independently; partial graphs supported
 9. **Context-Scoped** — Subgraphs with boundary contracts
 
+## Verified Metrics
+
+| Metric | Count | Method |
+|---|---|---|
+| Test cases (it blocks) | 1,669 | `\bit\s*\(` across tests/ |
+| Test files | 165 | `*.test.ts` in tests/ |
+| Source files | 95 | `*.ts` in src/ |
+| Source lines (non-blank) | 29,762 | counted programmatically |
+| CLI commands | 43 | counted from cli.ts case statements |
+| Reference programs | 17 | `src/ir/examples/` (14 standard + 3 real-world) |
+| Z3 formal proof rate | 77.9% | 88/113 postconditions proved UNSAT (with implementation axioms) |
+| Lean 4 proof rate | 74.2% tactic-proved, 25.8% sorry | 132/178 theorems |
+| Lean 4 compiler-verified | 0 | no lean4 installation |
+
+These numbers are generated by `scripts/count-metrics.ts` and verified against actual code.
+
+**Note:** Vitest reports ~2,300 tests including describe blocks and parameterized expansions.
+The 1,669 count reflects actual `it()` blocks in source.
+
 ## Known Limitations
 
-- Z3 verification covers arithmetic, boolean logic, comparisons, and implications.
-  Quantifiers, set operations, and complex predicates are verified at runtime by the
-  expression evaluator, not formally proved by Z3.
+- Z3 translates 93% of contract expressions to Z3 AST and formally proves ~78%
+  of postconditions using implementation axioms. Axioms are implementation
+  guarantees that Z3 assumes as true; proofs are sound if axioms are correct.
+  Remaining ~22% are unsupported expressions or incomplete axioms.
+  Runtime contract enforcement covers 100% of expressions.
+- Test count: vitest reports ~2,300 including describe blocks and parameterized
+  expansions. Actual it() blocks: ~1,669.
+- Lean 4 export generates syntactically valid Lean but has never been verified by
+  an actual Lean 4 compiler. Most non-trivial proofs contain sorry placeholders.
 - The LLVM native backend generates valid LLVM IR but end-to-end compilation
   to running binaries has not been verified in the test suite.
-- Lean 4 export produces proof skeletons with `sorry` placeholders. Most
-  non-trivial contracts require manual proof completion.
-- All service implementations (database, filesystem, email, HTTP, ML) are
-  in-memory simulations. No real I/O is performed.
+- Service implementations (database, filesystem, email, HTTP, ML) use
+  in-memory simulation. SQLite adapter uses sql.js (pure WASM) — no native
+  dependencies required.
 - The graph optimizer uses rule-based static analysis, not machine learning.
 - Multi-agent collaboration is simulated within a single process.
   No distributed execution capability exists.
@@ -278,3 +308,5 @@ The nine pillars are real design principles enforced throughout the toolchain �
 - **Phase 4** — LLVM native backend, C runtime, compilation pipeline, stub generator, benchmarking
 - **Phase 5** — Implementation registry, service container, real execution mode, expression evaluator, 16 program implementations, end-to-end workflows with real computation and in-memory services
 - **Phase 6** — Honest documentation, Z3 gap closure, real I/O adapters, LLVM end-to-end verification, Lean proof deepening, visual graph editor, interactive demo application
+- **Phase 7** — `.aether` surface syntax as primary format, parser (lexer/parser/emitter/bridge), VS Code extension, ecosystem integration
+- **Phase 8** — Metrics honesty, implementation axioms (Z3 proof rate 0.9% → 78%), compositional verification, universal services (sql.js replaces better-sqlite3), Z3 performance optimization (2s timeout, result caching, vitest workspace splitting)

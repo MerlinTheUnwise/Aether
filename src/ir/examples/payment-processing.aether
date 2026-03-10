@@ -4,6 +4,10 @@
 graph payment_processing v1
   effects: [payment_gateway.write, database.write, email]
 
+  pipeline_properties:
+    receipt_sent = true
+    captured_amount > 0
+
   metadata:
     description: "Payment processing pipeline with temporal state transitions and complex recovery chains"
     safety_level: high
@@ -13,6 +17,9 @@ graph payment_processing v1
   node validate_payment
     in:  amount: Float64 @USD @range(0.01, 999999.99), card_token: String @uuid @internal, merchant_id: String @commerce
     out: validated_amount: Float64 @USD, payment_id: String @uuid @payment, status: String @payment
+    axioms:
+      validated_amount = amount
+      status = created
     contracts:
       pre:  amount > 0
       pre:  card_token.length > 0
@@ -26,6 +33,10 @@ graph payment_processing v1
     in:  payment_id: String @uuid @payment, validated_amount: Float64 @USD, card_token: String @uuid @internal
     out: authorization_code: String @payment, authorized_amount: Float64 @USD, status: String @payment
     effects: [payment_gateway.write]
+    axioms:
+      authorized_amount = validated_amount
+      status = authorized
+      authorization_code.length > 0
     contracts:
       pre:  validated_amount > 0
       post: authorized_amount == validated_amount
@@ -46,6 +57,9 @@ graph payment_processing v1
     in:  authorization_code: String @payment, authorized_amount: Float64 @USD, payment_id: String @uuid @payment
     out: capture_id: String @payment, captured_amount: Float64 @USD, status: String @payment
     effects: [payment_gateway.write, database.write]
+    axioms:
+      captured_amount = authorized_amount
+      status = captured
     contracts:
       pre:  authorization_code.length > 0
       pre:  authorized_amount > 0
@@ -62,6 +76,8 @@ graph payment_processing v1
     in:  payment_id: String @uuid @payment, captured_amount: Float64 @USD, capture_id: String @payment
     out: receipt_sent: Bool
     effects: [email]
+    axioms:
+      receipt_sent = true
     contracts:
       post: receipt_sent == true
     recovery:

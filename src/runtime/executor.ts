@@ -918,7 +918,7 @@ export async function createExecutionContext(
   const { registerProgramImplementations } = await import("../implementations/programs/index.js");
   const { ServiceContainer } = await import("../implementations/services/container.js");
 
-  const services = ServiceContainer.createDefault(options?.serviceConfig);
+  const services = await ServiceContainer.createDefault(options?.serviceConfig);
   const registry = new ImplementationRegistry();
   registry.registerCore();
   registerProgramImplementations(registry);

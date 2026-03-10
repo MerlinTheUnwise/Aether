@@ -11,7 +11,7 @@ AETHER is a TypeScript toolchain for authoring, validating, verifying, and execu
 
 ## Current State
 
-6 phases complete. 1836 tests across 126 files. 16 reference programs. 10 published stdlib packages. 32 CLI commands.
+7 phases complete + Phase 8 Sessions 1–4. ~1,669 test cases (it blocks) across 165 files. 17 reference programs. 10 published stdlib packages. 43 CLI commands. Z3 proves ~78% of postconditions formally (with implementation axioms); runtime evaluator covers 100%. Lean 4 generates proof skeletons (74% tactic-proved, never compiler-verified). Zero native dependencies — pure WASM SQLite (sql.js), runs on any OS with Node.js 18+.
 
 ## Core Principles (The Nine Pillars)
 
@@ -37,7 +37,7 @@ aether/
 │   ├── type-system.md                 # Semantic types, temporal, dependent, templates
 │   ├── contracts.md                   # Contracts, Z3, adversarial, confidence, supervised
 │   ├── patterns.md                    # 14 complete IR examples (copy and adapt)
-│   ├── cli-reference.md              # All 32 CLI commands with flags
+│   ├── cli-reference.md              # All CLI commands with flags
 │   ├── collaboration.md              # Scopes, boundary contracts, multi-agent (single-process)
 │   ├── native-compilation.md         # LLVM backend (experimental), C runtime, benchmarking
 │   └── syntax-reference.md          # Complete .aether syntax reference
@@ -58,7 +58,7 @@ aether/
 │   ├── ir/
 │   │   ├── schema.json               # AETHER-IR JSON Schema (source of truth)
 │   │   ├── validator.ts              # Validator + scope/state/template rules
-│   │   └── examples/                 # 17 reference programs (.json + .aether)
+│   │   └── examples/                 # 17 reference programs (.json + .aether, 14 standard + 3 real-world)
 │   ├── compiler/
 │   │   ├── checker.ts                # Semantic type checker (6 dimensions)
 │   │   ├── verifier.ts              # Z3 contract verification (WASM)
@@ -109,11 +109,12 @@ aether/
 │   ├── stdlib/
 │   │   ├── patterns/                # 4 template patterns
 │   │   └── certified/              # 6 verified algorithms
-│   └── cli.ts                       # CLI entry point (32 commands)
+│   └── cli.ts                       # CLI entry point (43 commands)
 ├── scripts/
 │   ├── build-runtime.ts
-│   └── publish-stdlib.ts
-└── tests/                            # 1836 tests across 126 files
+│   ├── publish-stdlib.ts
+│   └── verify-clean-install.ts       # Verifies sql.js works without native deps
+└── tests/                            # ~1,669 test cases (it blocks) across 165 files
 ```
 
 ## Development Rules
@@ -130,7 +131,7 @@ aether/
 9. JSON is the IR that tools pass around internally — humans write `.aether`
 
 ### When Modifying the Toolchain
-- Run `npm test` before and after changes (2250 tests must pass)
+- Run `npm test` before and after changes (all tests must pass)
 - Run `npm run typecheck` (zero errors required)
 - The IR schema (`src/ir/schema.json`) is the source of truth — all tools read it
 - `additionalProperties: false` on all schema objects — no extra fields
@@ -192,23 +193,29 @@ aether/
 
 | Tier | Command | Status |
 |---|---|---|
-| Interpreted | `execute <path>` | Production-ready |
-| Compiled optimization | `execute <path> --jit` | Production-ready — compiles to optimized JavaScript |
+| Interpreted | `execute <path>` | Feature-complete and tested |
+| Compiled optimization | `execute <path> --jit` | Feature-complete and tested — compiles to optimized JavaScript |
 | Native (LLVM) | `compile <path>` | Experimental — generates LLVM IR, end-to-end execution not yet verified |
 
 Same graph. Same contracts. Same confidence. Three performance levels.
 
 ## Known Limitations
 
-- Z3 verification covers arithmetic, boolean logic, comparisons, and implications.
-  Quantifiers (∀, ∃), set operations (⊆, ∩), and complex predicates are verified
-  at runtime by the expression evaluator, not formally proved by Z3.
+- Z3 proves ~78% of postconditions formally using implementation axioms (was ~1%
+  before axioms). Axioms are implementation guarantees that Z3 assumes as true;
+  if axioms are correct, proofs are sound. Remaining ~22% are either unsupported
+  expressions or postconditions whose axioms are incomplete. Runtime contract
+  enforcement covers 100% of expressions.
+- Test count: vitest reports ~2,300 including describe blocks and parameterized
+  expansions. Actual it() blocks: ~1,669.
+- Lean 4 export generates syntactically valid Lean but has never been verified by
+  an actual Lean 4 compiler. Most non-trivial proofs contain sorry placeholders.
+  74% of theorems have tactic proofs, 26% have sorry.
 - The LLVM native backend generates valid LLVM IR but end-to-end compilation
   to running binaries has not been verified in the test suite.
-- Lean 4 export produces proof skeletons with `sorry` placeholders. Most
-  non-trivial contracts require manual proof completion.
-- All service implementations (database, filesystem, email, HTTP, ML) are
-  in-memory simulations. No real I/O is performed.
+- Service implementations (database, filesystem, email, HTTP, ML) use
+  in-memory simulation. SQLite adapter uses sql.js (pure WASM) — no native
+  dependencies. Data auto-saves to file for file-based databases.
 - The graph optimizer uses rule-based static analysis, not machine learning.
 - Multi-agent collaboration is simulated within a single process.
   No distributed execution capability exists.

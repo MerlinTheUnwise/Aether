@@ -48,6 +48,9 @@ graph multi_agent_marketplace v1
     in:  seller_id: String @pii, product_data: Map<String,String>
     out: listing_id: String, listing_price: Float64 @USD
     effects: [database.write]
+    axioms:
+      listing_id.length > 0
+      listing_price > 0
     contracts:
       pre:  product_data.length > 0
       post: listing_id.length > 0
@@ -60,6 +63,8 @@ graph multi_agent_marketplace v1
     in:  seller_id: String @pii
     out: seller_verified: Bool, seller_rating: Float64
     effects: [database.read]
+    axioms:
+      seller_verified = true
     contracts:
       post: seller_verified == true
     recovery:
@@ -74,6 +79,10 @@ graph multi_agent_marketplace v1
   node calculate_fees
     in:  listing_price: Float64 @USD, seller_rating: Float64
     out: platform_fee: Float64 @USD, seller_payout: Float64 @USD
+    axioms:
+      platform_fee >= 0
+      seller_payout >= 0
+      platform_fee + seller_payout = listing_price
     contracts:
       pre:  listing_price > 0
       post: platform_fee >= 0
@@ -86,6 +95,8 @@ graph multi_agent_marketplace v1
     in:  search_query: String
     out: search_results: List<Listing>, result_count: Int, selected_listing: String
     effects: [database.read]
+    axioms:
+      result_count >= 0
     contracts:
       post: result_count >= 0
     recovery:
@@ -96,6 +107,9 @@ graph multi_agent_marketplace v1
     in:  listing_id: String, buyer_id: String @pii, listing_price: Float64 @USD
     out: order_id: String, order_total: Float64 @USD
     effects: [database.write]
+    axioms:
+      order_id.length > 0
+      order_total > 0
     contracts:
       pre:  listing_id.length > 0
       pre:  listing_price > 0
@@ -109,6 +123,8 @@ graph multi_agent_marketplace v1
     in:  order_id: String, buyer_id: String @pii
     out: review_submitted: Bool, buyer_satisfaction: Float64
     effects: [database.write]
+    axioms:
+      review_submitted = true
     contracts:
       post: review_submitted == true
     recovery:
@@ -119,6 +135,9 @@ graph multi_agent_marketplace v1
     in:  order_id: String, order_total: Float64 @USD, platform_fee: Float64 @USD, seller_payout: Float64 @USD
     out: transaction_id: String @payment, payment_status: String @payment
     effects: [payment_gateway.write]
+    axioms:
+      payment_status = completed
+      transaction_id.length > 0
     contracts:
       pre:  order_total > 0
       pre:  platform_fee >= 0
@@ -134,6 +153,8 @@ graph multi_agent_marketplace v1
     in:  transaction_id: String @payment, seller_payout: Float64 @USD
     out: escrow_id: String @payment, escrow_status: String @payment
     effects: [payment_gateway.write, database.write]
+    axioms:
+      escrow_id.length > 0
     contracts:
       pre:  transaction_id.length > 0
       pre:  seller_payout >= 0
@@ -149,6 +170,8 @@ graph multi_agent_marketplace v1
   node refund_check
     in:  escrow_id: String @payment, buyer_satisfaction: Float64
     out: refund_eligible: Bool, final_payment_status: String @payment
+    axioms:
+      final_payment_status.length > 0
     contracts:
       pre:  escrow_id.length > 0
       post: final_payment_status.length > 0
@@ -159,6 +182,8 @@ graph multi_agent_marketplace v1
     in:  order_id: String, listing_id: String, transaction_id: String @payment
     out: tracking_number: String, estimated_delivery: String
     effects: [shipping.write, database.write]
+    axioms:
+      tracking_number.length > 0
     contracts:
       pre:  order_id.length > 0
       pre:  transaction_id.length > 0
@@ -171,6 +196,8 @@ graph multi_agent_marketplace v1
     in:  tracking_number: String, order_id: String
     out: delivery_status: String, delivery_confirmed: Bool
     effects: [database.read, notification]
+    axioms:
+      delivery_status.length > 0
     contracts:
       post: delivery_status.length > 0
     recovery:
@@ -181,6 +208,8 @@ graph multi_agent_marketplace v1
     in:  order_id: String, delivery_status: String, final_payment_status: String @payment
     out: notifications_sent: Bool
     effects: [email, notification]
+    axioms:
+      notifications_sent = true
     contracts:
       post: notifications_sent == true
     recovery:

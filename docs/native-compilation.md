@@ -156,7 +156,7 @@ All three tiers execute the same AETHER graph with the same semantics:
 | Tier | Mechanism | Performance | Use Case |
 |---|---|---|---|
 | Interpreted | Graph executor walks DAG | Baseline | Development, debugging |
-| JIT | Hot subgraphs → optimized JS | ~70-80% faster | Node.js production |
+| Runtime code generation (tiered) | Hot subgraphs → optimized JS | ~70-80% faster | Node.js production |
 | Native | Full graph → LLVM → binary | ~100-150x faster | Maximum performance |
 
 ### Benchmark
@@ -191,6 +191,7 @@ Everything that works in the interpreted/JIT tier works identically in native:
 
 ## Limitations
 
+- End-to-end compilation verified on Windows with clang. CI verification pending.
 - Native compilation requires LLVM installed locally
 - Node implementations must be provided as C functions (or stubs used)
 - No dynamic graph modification at runtime (the graph is compiled statically)

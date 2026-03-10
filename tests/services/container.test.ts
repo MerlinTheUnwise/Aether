@@ -7,8 +7,8 @@ import { AetherFileSystem } from "../../src/implementations/services/filesystem.
 import { AetherMLService } from "../../src/implementations/services/ml.js";
 
 describe("ServiceContainer", () => {
-  it("createDefault → all services available", () => {
-    const container = ServiceContainer.createDefault();
+  it("createDefault → all services available", async () => {
+    const container = await ServiceContainer.createDefault();
     expect(container.has("database")).toBe(true);
     expect(container.has("http")).toBe(true);
     expect(container.has("email")).toBe(true);
@@ -16,8 +16,8 @@ describe("ServiceContainer", () => {
     expect(container.has("ml")).toBe(true);
   });
 
-  it("getService returns correct service types", () => {
-    const container = ServiceContainer.createDefault();
+  it("getService returns correct service types", async () => {
+    const container = await ServiceContainer.createDefault();
     expect(container.get<AetherDatabase>("database")).toBeInstanceOf(AetherDatabase);
     expect(container.get<AetherHTTPService>("http")).toBeInstanceOf(AetherHTTPService);
     expect(container.get<AetherEmailService>("email")).toBeInstanceOf(AetherEmailService);
@@ -26,7 +26,7 @@ describe("ServiceContainer", () => {
   });
 
   it("seed database → data queryable", async () => {
-    const container = ServiceContainer.createDefault({
+    const container = await ServiceContainer.createDefault({
       database: {
         seed: {
           users: [
@@ -51,7 +51,7 @@ describe("ServiceContainer", () => {
   });
 
   it("injectFailures → failures active across services", async () => {
-    const container = ServiceContainer.createDefault();
+    const container = await ServiceContainer.createDefault();
     container.injectFailures({
       database: { type: "timeout", probability: 1.0 },
     });
@@ -61,7 +61,7 @@ describe("ServiceContainer", () => {
   });
 
   it("clearAllFailures → all services healthy again", async () => {
-    const container = ServiceContainer.createDefault();
+    const container = await ServiceContainer.createDefault();
     container.injectFailures({
       database: { type: "timeout", probability: 1.0 },
     });
@@ -73,7 +73,7 @@ describe("ServiceContainer", () => {
   });
 
   it("custom ML models registered via config", async () => {
-    const container = ServiceContainer.createDefault({
+    const container = await ServiceContainer.createDefault({
       ml: {
         models: {
           custom: {
@@ -96,7 +96,7 @@ describe("ServiceContainer", () => {
   });
 
   it("filesystem files via config", async () => {
-    const container = ServiceContainer.createDefault({
+    const container = await ServiceContainer.createDefault({
       filesystem: {
         files: { "/config.json": '{"key": "value"}' },
       },
@@ -107,7 +107,7 @@ describe("ServiceContainer", () => {
   });
 
   it("HTTP routes via config", async () => {
-    const container = ServiceContainer.createDefault({
+    const container = await ServiceContainer.createDefault({
       http: {
         routes: {
           "GET /health": async () => ({ status: 200, headers: {}, body: "ok" }),

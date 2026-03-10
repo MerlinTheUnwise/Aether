@@ -1,11 +1,18 @@
 graph user_registration v1
   effects: [database.read, database.write]
 
+  pipeline_properties:
+    user.status = active
+    normalized.is_lowercase = true
+
   // ─── Nodes ───
 
   node validate_email
     in:  email: String @email @pii
     out: valid: Bool, normalized: String @email @auth @pii
+    axioms:
+      normalized.is_lowercase = true
+      normalized.is_trimmed = true
     contracts:
       pre:  email.length > 0
       post: normalized.is_lowercase
@@ -18,6 +25,8 @@ graph user_registration v1
     in:  email: String @email @auth @pii
     out: unique: Bool
     effects: [database.read]
+    axioms:
+      unique = true ∨ unique = false
     contracts:
       post: unique <=> !exists(users, email)
     recovery:
@@ -29,6 +38,9 @@ graph user_registration v1
     in:  email: String @email @auth @pii, unique: Bool @constraint("== true")
     out: user: User @auth @pii
     effects: [database.write]
+    axioms:
+      user.email = email
+      user.status = active
     contracts:
       pre:  unique == true
       post: user.email == email

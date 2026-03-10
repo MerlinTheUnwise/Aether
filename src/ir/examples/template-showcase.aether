@@ -16,6 +16,8 @@ graph template-showcase v1
     node validate_input
       in:  data: $Entity
       out: validated: $Entity
+      axioms:
+        output.validated != null
       contracts:
         pre:  input.data != null
         post: output.validated != null
@@ -26,6 +28,8 @@ graph template-showcase v1
       in:  data: $Entity
       out: entity: $Entity, success: Bool
       effects: [$storage_effect]
+      axioms:
+        output.success = true
       contracts:
         pre:  input.data != null
         post: output.success == true
@@ -37,6 +41,8 @@ graph template-showcase v1
       in:  entity_id: $IdType
       out: entity: $Entity
       effects: [$storage_effect]
+      axioms:
+        output.entity != null
       contracts:
         pre:  input.entity_id != null
         post: output.entity != null
@@ -57,6 +63,8 @@ graph template-showcase v1
       in:  token: $TokenType
       out: claims: TokenClaims, valid: Bool
       effects: [$auth_effect]
+      axioms:
+        output.valid = true
       contracts:
         pre:  input.token != null
         post: output.valid == true
@@ -68,6 +76,8 @@ graph template-showcase v1
       in:  claims: TokenClaims
       out: user: $UserType
       effects: [$auth_effect]
+      axioms:
+        output.user != null
       contracts:
         pre:  input.claims != null
         post: output.user != null
@@ -79,6 +89,8 @@ graph template-showcase v1
       in:  user: $UserType
       out: authorized_user: $UserType
       effects: [$auth_effect]
+      axioms:
+        output.authorized_user != null
       contracts:
         pre:  input.user != null
         post: output.authorized_user != null
@@ -113,6 +125,8 @@ graph template-showcase v1
   node api_router
     in:  request: HTTPRequest
     out: token: JWT, entity_data: String, route: String
+    axioms:
+      output.route != null
     contracts:
       pre:  input.request != null
       post: output.route != null
@@ -122,6 +136,8 @@ graph template-showcase v1
   node response_builder
     in:  data: String, status: Int
     out: response: HTTPResponse
+    axioms:
+      output.response != null
     contracts:
       pre:  input.status > 0
       post: output.response != null

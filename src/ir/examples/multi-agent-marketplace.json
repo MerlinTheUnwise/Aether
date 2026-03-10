@@ -18,6 +18,7 @@
         "listing_id": { "type": "String", "domain": "catalog" },
         "listing_price": { "type": "Float64", "dimension": "currency", "unit": "USD" }
       },
+      "axioms": ["listing_id.length > 0", "listing_price > 0"],
       "contract": {
         "pre": ["product_data.length > 0"],
         "post": ["listing_id.length > 0", "listing_price > 0"]
@@ -36,6 +37,7 @@
         "seller_verified": { "type": "Bool" },
         "seller_rating": { "type": "Float64", "domain": "reputation" }
       },
+      "axioms": ["seller_verified = true"],
       "contract": {
         "post": ["seller_verified == true"]
       },
@@ -61,6 +63,7 @@
         "platform_fee": { "type": "Float64", "dimension": "currency", "unit": "USD" },
         "seller_payout": { "type": "Float64", "dimension": "currency", "unit": "USD" }
       },
+      "axioms": ["platform_fee >= 0", "seller_payout >= 0", "platform_fee + seller_payout = listing_price"],
       "contract": {
         "pre": ["listing_price > 0"],
         "post": ["platform_fee >= 0", "seller_payout >= 0", "platform_fee + seller_payout == listing_price"]
@@ -78,6 +81,7 @@
         "result_count": { "type": "Int" },
         "selected_listing": { "type": "String", "domain": "catalog" }
       },
+      "axioms": ["result_count >= 0"],
       "contract": {
         "post": ["result_count >= 0"]
       },
@@ -97,6 +101,7 @@
         "order_id": { "type": "String", "domain": "order" },
         "order_total": { "type": "Float64", "dimension": "currency", "unit": "USD" }
       },
+      "axioms": ["order_id.length > 0", "order_total > 0"],
       "contract": {
         "pre": ["listing_id.length > 0", "listing_price > 0"],
         "post": ["order_id.length > 0", "order_total > 0"]
@@ -116,6 +121,7 @@
         "review_submitted": { "type": "Bool" },
         "buyer_satisfaction": { "type": "Float64", "domain": "reputation" }
       },
+      "axioms": ["review_submitted = true"],
       "contract": {
         "post": ["review_submitted == true"]
       },
@@ -136,6 +142,7 @@
         "transaction_id": { "type": "String", "domain": "payment" },
         "payment_status": { "type": "String", "domain": "payment" }
       },
+      "axioms": ["payment_status = completed", "transaction_id.length > 0"],
       "contract": {
         "pre": ["order_total > 0", "platform_fee >= 0", "seller_payout >= 0"],
         "post": ["payment_status == completed", "transaction_id.length > 0"]
@@ -156,6 +163,7 @@
         "escrow_id": { "type": "String", "domain": "payment" },
         "escrow_status": { "type": "String", "domain": "payment" }
       },
+      "axioms": ["escrow_id.length > 0"],
       "contract": {
         "pre": ["transaction_id.length > 0", "seller_payout >= 0"],
         "post": ["escrow_id.length > 0"]
@@ -179,6 +187,7 @@
         "refund_eligible": { "type": "Bool" },
         "final_payment_status": { "type": "String", "domain": "payment" }
       },
+      "axioms": ["final_payment_status.length > 0"],
       "contract": {
         "pre": ["escrow_id.length > 0"],
         "post": ["final_payment_status.length > 0"]
@@ -197,6 +206,7 @@
         "tracking_number": { "type": "String", "domain": "fulfillment" },
         "estimated_delivery": { "type": "String", "domain": "fulfillment" }
       },
+      "axioms": ["tracking_number.length > 0"],
       "contract": {
         "pre": ["order_id.length > 0", "transaction_id.length > 0"],
         "post": ["tracking_number.length > 0"]
@@ -216,6 +226,7 @@
         "delivery_status": { "type": "String", "domain": "fulfillment" },
         "delivery_confirmed": { "type": "Bool" }
       },
+      "axioms": ["delivery_status.length > 0"],
       "contract": {
         "post": ["delivery_status.length > 0"]
       },
@@ -234,6 +245,7 @@
       "out": {
         "notifications_sent": { "type": "Bool" }
       },
+      "axioms": ["notifications_sent = true"],
       "contract": {
         "post": ["notifications_sent == true"]
       },

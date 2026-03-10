@@ -4,6 +4,10 @@
 graph sales_analytics_pipeline v1
   effects: [filesystem.read, filesystem.write, ml_model.infer, email]
 
+  pipeline_properties:
+    archived = true
+    sent = true
+
   metadata:
     description: "Real-world sales analytics pipeline: CSV ingestion, validation, cleaning, anomaly detection, parallel analytics, report generation, archival, and email delivery"
     safety_level: standard
@@ -14,6 +18,8 @@ graph sales_analytics_pipeline v1
     in:  file_path: String
     out: raw_data: List<Record>
     effects: [filesystem.read]
+    axioms:
+      raw_data.length > 0
     contracts:
       post: raw_data.length > 0
     recovery:
@@ -23,6 +29,8 @@ graph sales_analytics_pipeline v1
   node validate_records
     in:  raw_data: List<Record>
     out: valid: List<Record>, invalid: List<Record>
+    axioms:
+      valid.length + invalid.length = raw_data.length
     contracts:
       post: valid.length + invalid.length == raw_data.length
     pure
@@ -31,6 +39,8 @@ graph sales_analytics_pipeline v1
   node clean_and_normalize
     in:  valid: List<Record>
     out: cleaned: List<Record>
+    axioms:
+      cleaned.length <= valid.length
     contracts:
       post: cleaned.length <= valid.length
     pure
@@ -40,6 +50,8 @@ graph sales_analytics_pipeline v1
     in:  cleaned: List<Record>
     out: data: List<Record>, anomalies: List<Record>
     effects: [ml_model.infer]
+    axioms:
+      data.length + anomalies.length = cleaned.length
     contracts:
       post: data.length + anomalies.length == cleaned.length
     recovery:
@@ -52,6 +64,8 @@ graph sales_analytics_pipeline v1
   node calculate_revenue_by_region
     in:  data: List<Record>
     out: revenue_by_region: List<Record>
+    axioms:
+      revenue_by_region.length > 0
     contracts:
       post: revenue_by_region.length > 0
     pure
@@ -60,6 +74,8 @@ graph sales_analytics_pipeline v1
   node calculate_top_products
     in:  data: List<Record>
     out: top_products: List<Record>
+    axioms:
+      top_products.length <= 10
     contracts:
       post: top_products.length <= 10
     pure
@@ -68,6 +84,8 @@ graph sales_analytics_pipeline v1
   node calculate_growth_trends
     in:  data: List<Record>
     out: trends: List<Record>
+    axioms:
+      trends.length > 0
     contracts:
       post: trends.length > 0
     pure
@@ -76,6 +94,8 @@ graph sales_analytics_pipeline v1
   node generate_report
     in:  revenue_by_region: List<Record>, top_products: List<Record>, trends: List<Record>, anomalies: List<Record>
     out: report: Record
+    axioms:
+      report.sections_count = 4
     contracts:
       post: report.sections_count == 4
     pure
@@ -85,6 +105,8 @@ graph sales_analytics_pipeline v1
     in:  report: Record
     out: archived: Bool, path: String
     effects: [filesystem.write]
+    axioms:
+      archived = true
     contracts:
       post: archived == true
     recovery:
@@ -95,6 +117,8 @@ graph sales_analytics_pipeline v1
     in:  report: Record, archived: Bool
     out: sent: Bool
     effects: [email]
+    axioms:
+      sent = true
     contracts:
       pre:  archived == true
       post: sent == true

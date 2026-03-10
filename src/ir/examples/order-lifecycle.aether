@@ -30,6 +30,8 @@ graph order_lifecycle v1
     in:  customer_id: String @commerce, items: List<Product> @commerce
     out: order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle")
     effects: [database.write]
+    axioms:
+      status = "created"
     contracts:
       pre:  customer_id.length > 0
       post: status == "created"
@@ -42,6 +44,8 @@ graph order_lifecycle v1
     in:  order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle"), amount: Float64 @USD
     out: payment_id: String @uuid @payment, status: String @commerce @state_type("OrderLifecycle")
     effects: [payment_gateway.write, database.write]
+    axioms:
+      status = "paid"
     contracts:
       pre:  amount > 0
       post: status == "paid"
@@ -55,6 +59,8 @@ graph order_lifecycle v1
     in:  order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle"), payment_id: String @uuid @payment
     out: tracking_id: String, status: String @commerce @state_type("OrderLifecycle")
     effects: [shipping.write, database.write]
+    axioms:
+      status = "shipped"
     contracts:
       pre:  order_id.length > 0
       post: status == "shipped"
@@ -67,6 +73,8 @@ graph order_lifecycle v1
     in:  order_id: String @uuid @commerce, status: String @commerce @state_type("OrderLifecycle"), tracking_id: String
     out: delivered_at: String @iso8601, status: String @commerce @state_type("OrderLifecycle")
     effects: [database.write, email]
+    axioms:
+      status = "delivered"
     contracts:
       pre:  tracking_id.length > 0
       post: status == "delivered"
@@ -79,6 +87,8 @@ graph order_lifecycle v1
     in:  order_id: String @uuid @commerce, reason: String
     out: cancelled_at: String @iso8601, status: String @commerce @state_type("OrderLifecycle")
     effects: [database.write, email]
+    axioms:
+      status = "cancelled"
     contracts:
       pre:  order_id.length > 0
       post: status == "cancelled"
@@ -91,6 +101,8 @@ graph order_lifecycle v1
     in:  order_id: String @uuid @commerce, payment_id: String @uuid @payment, reason: String
     out: refund_id: String @uuid @payment, status: String @commerce @state_type("OrderLifecycle")
     effects: [payment_gateway.write, database.write, email]
+    axioms:
+      status = "refunded"
     contracts:
       pre:  payment_id.length > 0
       post: status == "refunded"

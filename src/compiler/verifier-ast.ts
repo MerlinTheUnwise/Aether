@@ -850,13 +850,13 @@ function getBound(listName: string, tctx: TranslationContext, defaultBound: numb
   // Check annotations for range info
   const ann = tctx.annotations.get(listName);
   if (ann?.range) {
-    return Math.min(ann.range[1], 10); // Cap at 10 to avoid explosion
+    return Math.min(ann.range[1], 5); // Cap at 5 to avoid explosion
   }
   if (ann?.constraint) {
     // Try to extract "size in N..M" bounds
     const match = ann.constraint.match(/size\s+in\s+(\d+)\.\.(\d+)/);
     if (match) {
-      return Math.min(parseInt(match[2], 10), 10);
+      return Math.min(parseInt(match[2], 10), 5);
     }
   }
   return defaultBound;

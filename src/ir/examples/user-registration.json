@@ -2,6 +2,10 @@
   "id": "user_registration",
   "version": 1,
   "effects": ["database.read", "database.write"],
+  "pipeline_properties": [
+    "user.status = active",
+    "normalized.is_lowercase = true"
+  ],
   "nodes": [
     {
       "id": "validate_email",
@@ -23,6 +27,10 @@
           "sensitivity": "pii"
         }
       },
+      "axioms": [
+        "normalized.is_lowercase = true",
+        "normalized.is_trimmed = true"
+      ],
       "contract": {
         "pre": ["email.length > 0"],
         "post": [
@@ -49,6 +57,9 @@
           "type": "Bool"
         }
       },
+      "axioms": [
+        "unique = true ∨ unique = false"
+      ],
       "contract": {
         "post": ["unique <=> !exists(users, email)"]
       },
@@ -85,6 +96,10 @@
           "sensitivity": "pii"
         }
       },
+      "axioms": [
+        "user.email = email",
+        "user.status = active"
+      ],
       "contract": {
         "pre": ["unique == true"],
         "post": [

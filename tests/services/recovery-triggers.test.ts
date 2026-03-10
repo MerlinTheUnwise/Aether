@@ -24,7 +24,7 @@ function makeContext(services: ServiceContainer): ImplementationContext {
 
 describe("Recovery Triggers — Service Failures", () => {
   it("database timeout on read → retry fires 3 times", async () => {
-    const container = ServiceContainer.createDefault();
+    const container = await ServiceContainer.createDefault();
     const db = container.get<AetherDatabase>("database");
     // exists() calls query() internally, so inject on "query" operation
     db.injectFailure({ type: "timeout", probability: 1.0, on_operation: "query" });
@@ -53,7 +53,7 @@ describe("Recovery Triggers — Service Failures", () => {
   });
 
   it("database error → fallback returns { unique: false }", async () => {
-    const container = ServiceContainer.createDefault();
+    const container = await ServiceContainer.createDefault();
     const db = container.get<AetherDatabase>("database");
     db.injectFailure({ type: "connection_error", probability: 1.0 });
 
@@ -76,7 +76,7 @@ describe("Recovery Triggers — Service Failures", () => {
   });
 
   it("email failure → report recovery logs the error", async () => {
-    const container = ServiceContainer.createDefault();
+    const container = await ServiceContainer.createDefault();
     const emailSvc = container.get<AetherEmailService>("email");
     emailSvc.injectFailure({ probability: 1.0, error: "SMTP connection refused" });
 
@@ -105,7 +105,7 @@ describe("Recovery Triggers — Service Failures", () => {
   });
 
   it("HTTP 401 → respond recovery returns 401", async () => {
-    const container = ServiceContainer.createDefault();
+    const container = await ServiceContainer.createDefault();
     const http = container.get<AetherHTTPService>("http");
     http.injectFailure({ status: 401, probability: 1.0 });
 
@@ -133,7 +133,7 @@ describe("Recovery Triggers — Service Failures", () => {
   });
 
   it("database failure only on specific operation preserves other ops", async () => {
-    const container = ServiceContainer.createDefault();
+    const container = await ServiceContainer.createDefault();
     const db = container.get<AetherDatabase>("database");
 
     // Only fail on read, create should work
@@ -150,8 +150,8 @@ describe("Recovery Triggers — Service Failures", () => {
     await expect(svc.read("users", id)).rejects.toThrow(/timeout/i);
   });
 
-  it("services from container are shared instances", () => {
-    const container = ServiceContainer.createDefault();
+  it("services from container are shared instances", async () => {
+    const container = await ServiceContainer.createDefault();
     const ctx1 = makeContext(container);
     const ctx2 = makeContext(container);
 

@@ -36,6 +36,14 @@ function emitGraph(graph: ASTGraph, lines: string[]) {
     lines.push(`  partial`);
   }
 
+  if (graph.pipelineProperties && graph.pipelineProperties.length > 0) {
+    lines.push("");
+    lines.push("  pipeline_properties:");
+    for (const p of graph.pipelineProperties) {
+      lines.push(`    ${p}`);
+    }
+  }
+
   if (graph.metadata) {
     lines.push("");
     lines.push("  metadata:");
@@ -120,6 +128,13 @@ function emitNode(node: ASTNode, lines: string[], indent: string) {
 
   if (node.effects && node.effects.length > 0) {
     lines.push(`${indent}  effects: [${node.effects.join(", ")}]`);
+  }
+
+  if (node.axioms && node.axioms.length > 0) {
+    lines.push(`${indent}  axioms:`);
+    for (const a of node.axioms) {
+      lines.push(`${indent}    ${a}`);
+    }
   }
 
   if (node.contracts) {

@@ -34,6 +34,8 @@ graph scoped_ecommerce v1
     in:  session_id: String
     out: cart_items: List<CartItem>, cart_total: Float64 @USD
     effects: [database.read, cache.read]
+    axioms:
+      cart_total >= 0
     contracts:
       post: cart_total >= 0
     recovery:
@@ -44,6 +46,8 @@ graph scoped_ecommerce v1
     in:  cart_items: List<CartItem>
     out: in_stock_items: List<CartItem>, all_available: Bool
     effects: [database.read]
+    axioms:
+      all_available = true
     contracts:
       post: all_available == true
     recovery:
@@ -53,6 +57,9 @@ graph scoped_ecommerce v1
   node apply_discounts
     in:  in_stock_items: List<CartItem>, cart_total: Float64 @USD
     out: final_total: Float64 @USD, discount_applied: String
+    axioms:
+      final_total >= 0
+      final_total <= cart_total
     contracts:
       pre:  cart_total >= 0
       post: final_total >= 0
@@ -64,6 +71,8 @@ graph scoped_ecommerce v1
     in:  in_stock_items: List<CartItem>
     out: reservation_id: String, reserved_items: List<CartItem>
     effects: [database.write]
+    axioms:
+      reservation_id.length > 0
     contracts:
       post: reservation_id.length > 0
     recovery:
@@ -74,6 +83,9 @@ graph scoped_ecommerce v1
     in:  final_total: Float64 @USD, reservation_id: String
     out: transaction_id: String @payment, charge_status: String @payment
     effects: [payment_gateway.write]
+    axioms:
+      charge_status = success
+      transaction_id.length > 0
     contracts:
       pre:  final_total > 0
       pre:  reservation_id.length > 0
@@ -88,6 +100,8 @@ graph scoped_ecommerce v1
     in:  transaction_id: String @payment, reserved_items: List<CartItem>, final_total: Float64 @USD
     out: order_id: String, order_status: String
     effects: [database.write]
+    axioms:
+      order_id.length > 0
     contracts:
       pre:  transaction_id.length > 0
       post: order_id.length > 0
@@ -99,6 +113,8 @@ graph scoped_ecommerce v1
     in:  order_id: String, transaction_id: String @payment
     out: receipt_sent: Bool
     effects: [email]
+    axioms:
+      receipt_sent = true
     contracts:
       post: receipt_sent == true
     recovery:
@@ -109,6 +125,8 @@ graph scoped_ecommerce v1
     in:  order_id: String, final_total: Float64 @USD
     out: event_logged: Bool
     effects: [analytics.write]
+    axioms:
+      event_logged = true
     contracts:
       post: event_logged == true
     recovery:

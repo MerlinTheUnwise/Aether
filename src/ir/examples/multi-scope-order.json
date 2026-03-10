@@ -30,6 +30,7 @@
           "unit": "USD"
         }
       },
+      "axioms": ["total_amount > 0"],
       "contract": {
         "post": ["total_amount > 0"]
       },
@@ -53,6 +54,7 @@
           "domain": "inventory"
         }
       },
+      "axioms": ["available = true"],
       "contract": {
         "post": ["available == true"]
       },
@@ -96,6 +98,7 @@
           "domain": "payment"
         }
       },
+      "axioms": ["payment_status = completed", "transaction_id.length > 0"],
       "contract": {
         "pre": ["total_amount > 0", "available == true"],
         "post": ["payment_status == completed", "transaction_id.length > 0"]
@@ -139,6 +142,7 @@
           "domain": "fulfillment"
         }
       },
+      "axioms": ["tracking_number.length > 0"],
       "contract": {
         "pre": ["transaction_id.length > 0"],
         "post": ["tracking_number.length > 0"]
@@ -173,6 +177,7 @@
           "type": "Bool"
         }
       },
+      "axioms": ["notification_sent = true"],
       "contract": {
         "post": ["notification_sent == true"]
       },

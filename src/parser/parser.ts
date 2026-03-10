@@ -197,6 +197,7 @@ class Parser {
     const comments: ASTComment[] = [];
     let partial = false;
     let metadata: ASTMetadata | undefined;
+    let pipelineProperties: string[] | undefined;
 
     while (!this.check("END") && !this.check("EOF")) {
       const innerComments = this.skipNewlinesAndComments();
@@ -217,6 +218,13 @@ class Parser {
         case "PARTIAL": {
           this.advance();
           partial = true;
+          break;
+        }
+        case "PIPELINE_PROPERTIES": {
+          this.advance();
+          this.match("COLON");
+          this.skipNewlines();
+          pipelineProperties = this.parseIndentedExpressionList();
           break;
         }
         case "METADATA": {
@@ -298,6 +306,7 @@ class Parser {
       templateUses,
       comments,
       metadata,
+      pipelineProperties,
       loc: this.loc(startTok),
     };
   }
@@ -371,6 +380,13 @@ class Parser {
         case "PURE": {
           this.advance();
           node.pure = true;
+          break;
+        }
+        case "AXIOMS": {
+          this.advance();
+          this.match("COLON");
+          this.skipNewlines();
+          node.axioms = this.parseAxiomsBlock();
           break;
         }
         case "ADVERSARIAL": {
@@ -1206,6 +1222,48 @@ class Parser {
     }
 
     return rules;
+  }
+
+  private parseIndentedExpressionList(): string[] {
+    const items: string[] = [];
+
+    while (true) {
+      this.skipNewlines();
+      const tok = this.peek();
+      // Stop when we see a keyword that starts a new section, END, or COMMENT
+      if (tok.type === "END" || tok.type === "EOF" || tok.type === "COMMENT" ||
+          this.isBlockStart() ||
+          tok.type === "METADATA" || tok.type === "EFFECTS" || tok.type === "PARTIAL" ||
+          tok.type === "PIPELINE_PROPERTIES") {
+        break;
+      }
+      const expr = this.parseExpression();
+      if (expr.length === 0) break; // safety: prevent infinite loop
+      items.push(expr);
+    }
+
+    return items;
+  }
+
+  private parseAxiomsBlock(): string[] {
+    const axioms: string[] = [];
+
+    while (true) {
+      this.skipNewlines();
+      const tok = this.peek();
+      // Axiom lines are just expressions, one per line
+      // Stop when we see a keyword that starts a new section or END
+      if (tok.type === "END" || tok.type === "EOF" || this.isBlockStart() ||
+          tok.type === "CONTRACTS" || tok.type === "RECOVERY" || tok.type === "ADVERSARIAL" ||
+          tok.type === "SUPERVISED" || tok.type === "PURE" || tok.type === "CONFIDENCE" ||
+          tok.type === "EFFECTS" || tok.type === "IN" || tok.type === "OUT" ||
+          tok.type === "AXIOMS") {
+        break;
+      }
+      axioms.push(this.parseExpression());
+    }
+
+    return axioms;
   }
 
   private parseAdversarialBlock(): string[] {

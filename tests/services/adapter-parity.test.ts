@@ -7,13 +7,13 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { AetherDatabase } from "../../src/implementations/services/database.js";
-import { SQLiteDatabaseAdapter, isSQLiteAvailable } from "../../src/implementations/services/database-sqlite.js";
+import { SQLiteDatabaseAdapter } from "../../src/implementations/services/database-sqlite.js";
 import { AetherFileSystem } from "../../src/implementations/services/filesystem.js";
 import { RealFilesystemAdapter } from "../../src/implementations/services/filesystem-real.js";
 import { mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
-describe.skipIf(!isSQLiteAvailable)("Adapter Parity — Database", () => {
+describe("Adapter Parity — Database", () => {
   const sqliteDbs: SQLiteDatabaseAdapter[] = [];
 
   afterEach(() => {
@@ -84,7 +84,7 @@ describe.skipIf(!isSQLiteAvailable)("Adapter Parity — Database", () => {
     ];
 
     mock.seed("products", seedData);
-    real.seed("products", seedData);
+    await real.seed("products", seedData);
 
     const mockResult = await mock.query("products", { field: "price", operator: ">=", value: 15 });
     const realResult = await real.query("products", { field: "price", operator: ">=", value: 15 });
@@ -104,7 +104,7 @@ describe.skipIf(!isSQLiteAvailable)("Adapter Parity — Database", () => {
     ];
 
     mock.seed("items", seedData);
-    real.seed("items", seedData);
+    await real.seed("items", seedData);
 
     expect(await mock.count("items")).toBe(await real.count("items"));
     expect(await mock.count("items", { field: "type", operator: "=", value: "A" }))
@@ -144,7 +144,7 @@ describe.skipIf(!isSQLiteAvailable)("Adapter Parity — Database", () => {
     const real = createReal();
 
     mock.seed("items", [{ id: "i1", status: "active" }]);
-    real.seed("items", [{ id: "i1", status: "active" }]);
+    await real.seed("items", [{ id: "i1", status: "active" }]);
 
     const filter = { field: "status", operator: "=" as const, value: "active" };
     expect(await mock.exists("items", filter)).toBe(await real.exists("items", filter));

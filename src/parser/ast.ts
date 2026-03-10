@@ -68,6 +68,7 @@ export interface ASTNode {
   recovery?: ASTRecoveryRule[];
   confidence?: number;
   pure?: boolean;
+  axioms?: string[];               // implementation guarantee expressions
   adversarial?: string[];          // break_if expressions
   supervised?: ASTSupervised;
   comments: ASTComment[];
@@ -212,6 +213,7 @@ export interface ASTGraph {
   templateUses: ASTTemplateUse[];
   comments: ASTComment[];
   metadata?: ASTMetadata;
+  pipelineProperties?: string[];
   loc: SourceLocation;
 }
 

@@ -87,6 +87,7 @@ export interface AetherNode {
   contract: Contract;
   confidence?: number;
   adversarial_check?: AdversarialCheck;
+  axioms?: string[];
   effects: string[];
   pure?: boolean;
   recovery?: Record<string, RecoveryAction>;

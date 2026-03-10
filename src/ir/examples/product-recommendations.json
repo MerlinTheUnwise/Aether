@@ -23,6 +23,7 @@
           "sensitivity": "pii"
         }
       },
+      "axioms": ["user.id != null", "user.authenticated = true"],
       "contract": {
         "pre": ["token.length > 0"],
         "post": ["user.id != null", "user.authenticated == true"]

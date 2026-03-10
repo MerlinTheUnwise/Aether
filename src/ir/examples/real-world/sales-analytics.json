@@ -2,6 +2,10 @@
   "id": "sales_analytics_pipeline",
   "version": 1,
   "effects": ["filesystem.read", "filesystem.write", "ml_model.infer", "email"],
+  "pipeline_properties": [
+    "archived = true",
+    "sent = true"
+  ],
   "metadata": {
     "description": "Real-world sales analytics pipeline: CSV ingestion, validation, cleaning, anomaly detection, parallel analytics, report generation, archival, and email delivery",
     "safety_level": "standard"
@@ -15,6 +19,7 @@
       "out": {
         "raw_data": { "type": "List<Record>", "domain": "sales" }
       },
+      "axioms": ["raw_data.length > 0"],
       "contract": {
         "post": ["raw_data.length > 0"]
       },
@@ -35,6 +40,7 @@
         "valid": { "type": "List<Record>", "domain": "sales" },
         "invalid": { "type": "List<Record>", "domain": "sales" }
       },
+      "axioms": ["valid.length + invalid.length = raw_data.length"],
       "contract": {
         "post": ["valid.length + invalid.length == raw_data.length"]
       },
@@ -49,6 +55,7 @@
       "out": {
         "cleaned": { "type": "List<Record>", "domain": "sales" }
       },
+      "axioms": ["cleaned.length <= valid.length"],
       "contract": {
         "post": ["cleaned.length <= valid.length"]
       },
@@ -64,6 +71,7 @@
         "data": { "type": "List<Record>", "domain": "sales" },
         "anomalies": { "type": "List<Record>", "domain": "sales" }
       },
+      "axioms": ["data.length + anomalies.length = cleaned.length"],
       "contract": {
         "post": ["data.length + anomalies.length == cleaned.length"]
       },
@@ -87,6 +95,7 @@
       "out": {
         "revenue_by_region": { "type": "List<Record>", "domain": "analytics" }
       },
+      "axioms": ["revenue_by_region.length > 0"],
       "contract": {
         "post": ["revenue_by_region.length > 0"]
       },
@@ -101,6 +110,7 @@
       "out": {
         "top_products": { "type": "List<Record>", "domain": "analytics" }
       },
+      "axioms": ["top_products.length <= 10"],
       "contract": {
         "post": ["top_products.length <= 10"]
       },
@@ -115,6 +125,7 @@
       "out": {
         "trends": { "type": "List<Record>", "domain": "analytics" }
       },
+      "axioms": ["trends.length > 0"],
       "contract": {
         "post": ["trends.length > 0"]
       },
@@ -132,6 +143,7 @@
       "out": {
         "report": { "type": "Record", "domain": "analytics" }
       },
+      "axioms": ["report.sections_count = 4"],
       "contract": {
         "post": ["report.sections_count == 4"]
       },
@@ -147,6 +159,7 @@
         "archived": { "type": "Bool" },
         "path": { "type": "String", "domain": "filesystem" }
       },
+      "axioms": ["archived = true"],
       "contract": {
         "post": ["archived == true"]
       },
@@ -167,6 +180,7 @@
       "out": {
         "sent": { "type": "Bool" }
       },
+      "axioms": ["sent = true"],
       "contract": {
         "pre": ["archived == true"],
         "post": ["sent == true"]

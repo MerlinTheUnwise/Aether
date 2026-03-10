@@ -6,6 +6,9 @@ graph rate_limiter v1
   node check_quota
     in:  client_id: String, window_seconds: Int @seconds, max_requests: Int @range(1, 10000)
     out: current_count: Int, within_limit: Bool, remaining: Int
+    axioms:
+      current_count >= 0
+      remaining >= 0
     contracts:
       post: current_count >= 0
       post: remaining >= 0
@@ -16,6 +19,9 @@ graph rate_limiter v1
     in:  client_id: String, within_limit: Bool @constraint("== true")
     out: new_count: Int, success: Bool
     effects: [database.write]
+    axioms:
+      new_count > 0
+      success = true
     contracts:
       pre:  within_limit == true
       post: new_count > 0
@@ -28,6 +34,8 @@ graph rate_limiter v1
     in:  within_limit: Bool, remaining: Int, client_id: String
     out: allowed: Bool, retry_after_seconds: Int @seconds
     effects: [database.read]
+    axioms:
+      retry_after_seconds >= 0
     contracts:
       post: retry_after_seconds >= 0
     recovery:
@@ -38,6 +46,9 @@ graph rate_limiter v1
     in:  client_id: String, window_seconds: Int @seconds
     out: reset_at: Int @seconds, cleared: Bool
     effects: [database.write]
+    axioms:
+      reset_at > 0
+      cleared = true
     contracts:
       post: reset_at > 0
       post: cleared == true

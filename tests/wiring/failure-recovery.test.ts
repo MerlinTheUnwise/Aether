@@ -164,7 +164,7 @@ describe("Failure Recovery — Real Implementations", () => {
   });
 
   it("inject database failure via ServiceContainer", async () => {
-    const services = ServiceContainer.createDefault({
+    const services = await ServiceContainer.createDefault({
       database: { seed: { users: [{ id: "u1", email: "a@b.com" }] } },
     });
 

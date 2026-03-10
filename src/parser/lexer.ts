@@ -11,6 +11,7 @@ export type TokenType =
   | "PRE" | "POST" | "PURE" | "ENSURE" | "CONSTRAINTS" | "PARAMS"
   | "STATES" | "TRANSITIONS" | "NEVER" | "TERMINAL" | "INITIAL" | "WHEN"
   | "REQUIRES" | "PROVIDES" | "NODES" | "MUST_SATISFY"
+  | "AXIOMS" | "PIPELINE_PROPERTIES"
   | "ADVERSARIAL" | "BREAK_IF"
   | "PARTIAL" | "METADATA" | "DESCRIPTION" | "SAFETY_LEVEL" | "HUMAN_OVERSIGHT"
   | "SLA" | "LATENCY_MS" | "AVAILABILITY"
@@ -69,6 +70,8 @@ const KEYWORDS: Record<string, TokenType> = {
   provides: "PROVIDES",
   nodes: "NODES",
   must_satisfy: "MUST_SATISFY",
+  axioms: "AXIOMS",
+  pipeline_properties: "PIPELINE_PROPERTIES",
   adversarial: "ADVERSARIAL",
   break_if: "BREAK_IF",
   partial: "PARTIAL",

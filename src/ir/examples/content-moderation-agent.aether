@@ -15,6 +15,9 @@ graph content_moderation_agent v1
     in:  content: String @mod, content_type: String @mod
     out: category: String @mod, classification_confidence: Float64 @range(0, 1)
     effects: [ml_model.infer]
+    axioms:
+      classification_confidence >= 0
+      classification_confidence <= 1
     contracts:
       post: classification_confidence >= 0
       post: classification_confidence <= 1
@@ -31,6 +34,9 @@ graph content_moderation_agent v1
     in:  category: String @mod, classification_confidence: Float64 @range(0, 1), content: String @mod
     out: severity: String @mod, combined_confidence: Float64 @range(0, 1)
     effects: [ml_model.infer]
+    axioms:
+      combined_confidence >= 0
+      combined_confidence <= 1
     contracts:
       post: combined_confidence >= 0
       post: combined_confidence <= 1
@@ -46,6 +52,9 @@ graph content_moderation_agent v1
     in:  severity: String @mod, combined_confidence: Float64 @range(0, 1), category: String @mod
     out: moderation_action: String @mod, requires_human_review: Bool, decision_confidence: Float64 @range(0, 1)
     effects: [database.read]
+    axioms:
+      decision_confidence >= 0
+      decision_confidence <= 1
     contracts:
       post: decision_confidence >= 0
       post: decision_confidence <= 1
@@ -63,6 +72,8 @@ graph content_moderation_agent v1
     in:  moderation_action: String @mod, requires_human_review: Bool, decision_confidence: Float64 @constraint("> 0.9") @range(0, 1)
     out: action_taken: String @mod, success: Bool
     effects: [database.write]
+    axioms:
+      success = true
     contracts:
       pre:  decision_confidence > 0
       post: success == true
@@ -74,6 +85,8 @@ graph content_moderation_agent v1
     in:  action_taken: String @mod, decision_confidence: Float64 @range(0, 1), category: String @mod
     out: logged: Bool
     effects: [database.write]
+    axioms:
+      logged = true
     contracts:
       post: logged == true
     recovery:

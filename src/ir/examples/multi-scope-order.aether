@@ -42,6 +42,8 @@ graph multi_scope_order v1
   node validate_order
     in:  order_items: List<OrderItem>, customer_id: String @pii
     out: validated_order: Order, total_amount: Float64 @USD
+    axioms:
+      total_amount > 0
     contracts:
       post: total_amount > 0
     pure
@@ -51,6 +53,8 @@ graph multi_scope_order v1
     in:  validated_order: Order
     out: available: Bool, reserved_items: List<OrderItem>
     effects: [database.read, database.write]
+    axioms:
+      available = true
     contracts:
       post: available == true
     recovery:
@@ -62,6 +66,9 @@ graph multi_scope_order v1
     in:  total_amount: Float64 @USD, customer_id: String @pii, available: Bool @constraint("== true")
     out: transaction_id: String @payment, payment_status: String @payment
     effects: [payment_gateway.write]
+    axioms:
+      payment_status = completed
+      transaction_id.length > 0
     contracts:
       pre:  total_amount > 0
       pre:  available == true
@@ -76,6 +83,8 @@ graph multi_scope_order v1
     in:  reserved_items: List<OrderItem>, customer_id: String @pii, transaction_id: String @payment
     out: tracking_number: String, estimated_delivery: String
     effects: [shipping.write, database.write]
+    axioms:
+      tracking_number.length > 0
     contracts:
       pre:  transaction_id.length > 0
       post: tracking_number.length > 0
@@ -87,6 +96,8 @@ graph multi_scope_order v1
     in:  customer_id: String @pii, transaction_id: String @payment, tracking_number: String
     out: notification_sent: Bool
     effects: [email]
+    axioms:
+      notification_sent = true
     contracts:
       post: notification_sent == true
     recovery:

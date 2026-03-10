@@ -1,58 +1,104 @@
 /**
  * AETHER Service — SQLite Database Adapter
  *
- * A real database adapter using better-sqlite3.
- * Drop-in replacement for AetherDatabase with real persistence,
- * real transactions, real constraints, real failure modes.
+ * A real database adapter using sql.js (SQLite compiled to WebAssembly).
+ * Pure JavaScript — no native compilation, no node-gyp, no C++ compiler.
+ * Works on any platform with Node.js 18+.
  */
 
-import { createRequire } from "module";
+import initSqlJs, { type Database as SqlJsDatabase } from "sql.js";
 import { randomUUID } from "crypto";
+import { createRequire } from "module";
 import type { DatabaseAdapter } from "./adapter.js";
 import type { QueryFilter } from "./database.js";
 
 const require = createRequire(import.meta.url);
-let Database: any;
-try {
-  Database = require("better-sqlite3");
-} catch {
-  Database = null;
-}
-
-/** Whether better-sqlite3 is available in this environment */
-export const isSQLiteAvailable = Database !== null;
 
 export class SQLiteDatabaseAdapter implements DatabaseAdapter {
-  private db: any;
+  private db: SqlJsDatabase | null = null;
   private knownTables: Set<string> = new Set();
   private dbPath: string;
+  private initialized: boolean = false;
+  private initPromise: Promise<void> | null = null;
 
   constructor(dbPath?: string) {
-    if (!Database) {
-      throw new Error(
-        "SQLite adapter requires better-sqlite3. Install with: npm install better-sqlite3\n" +
-        "Requires: node-gyp, Python 3, C++ compiler (Visual Studio Build Tools on Windows)\n" +
-        "See: https://github.com/JoshuaWise/better-sqlite3/blob/master/docs/troubleshooting.md"
-      );
-    }
     this.dbPath = dbPath ?? ":memory:";
-    this.db = new Database(this.dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("foreign_keys = ON");
+  }
 
-    // Discover existing tables from database schema
-    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
-    for (const t of tables as { name: string }[]) {
-      this.knownTables.add(t.name);
+  /** Lazy initialization — load WASM on first use */
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+    if (this.initPromise) return this.initPromise;
+
+    this.initPromise = this._init();
+    return this.initPromise;
+  }
+
+  private async _init(): Promise<void> {
+    const SQL = await initSqlJs();
+
+    if (this.dbPath !== ":memory:") {
+      try {
+        const fs = await import("fs");
+        if (fs.existsSync(this.dbPath)) {
+          const buffer = fs.readFileSync(this.dbPath);
+          this.db = new SQL.Database(buffer);
+        } else {
+          this.db = new SQL.Database();
+        }
+      } catch {
+        this.db = new SQL.Database();
+      }
+    } else {
+      this.db = new SQL.Database();
     }
+
+    // Enable foreign keys
+    this.db.run("PRAGMA foreign_keys = ON");
+
+    // Discover existing tables
+    const result = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+    if (result.length > 0) {
+      for (const row of result[0].values) {
+        this.knownTables.add(row[0] as string);
+      }
+    }
+
+    this.initialized = true;
+  }
+
+  /** Save database to file (for persistence) */
+  async save(): Promise<void> {
+    if (this.dbPath === ":memory:" || !this.db) return;
+    const fs = require("fs") as typeof import("fs");
+    const path = require("path") as typeof import("path");
+    const dir = path.dirname(this.dbPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const data = this.db.export();
+    fs.writeFileSync(this.dbPath, Buffer.from(data));
+  }
+
+  /** Auto-save after mutations for file-based databases */
+  private autoSave(): void {
+    if (this.dbPath === ":memory:" || !this.db) return;
+    const fs = require("fs") as typeof import("fs");
+    const path = require("path") as typeof import("path");
+    const dir = path.dirname(this.dbPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const data = this.db.export();
+    fs.writeFileSync(this.dbPath, Buffer.from(data));
   }
 
   async create(table: string, record: Record<string, any>): Promise<{ id: string; record: Record<string, any> }> {
+    await this.ensureInitialized();
     this.ensureTable(table, record);
     const id = record.id ?? randomUUID();
     const full: Record<string, any> = { ...record, id };
 
-    // Ensure all columns exist
     this.ensureColumns(table, full);
 
     const columns = Object.keys(full);
@@ -60,7 +106,10 @@ export class SQLiteDatabaseAdapter implements DatabaseAdapter {
     const values = columns.map(c => this.serialize(full[c]));
 
     try {
-      this.db.prepare(`INSERT INTO "${table}" (${columns.map(c => `"${c}"`).join(", ")}) VALUES (${placeholders})`).run(...values);
+      this.db!.run(
+        `INSERT INTO "${table}" (${columns.map(c => `"${c}"`).join(", ")}) VALUES (${placeholders})`,
+        values
+      );
     } catch (err: any) {
       if (err.message?.includes("UNIQUE constraint")) {
         throw Object.assign(new Error(`Duplicate ID "${id}" in table "${table}"`), { type: "constraint_violation" });
@@ -68,16 +117,20 @@ export class SQLiteDatabaseAdapter implements DatabaseAdapter {
       throw err;
     }
 
+    this.autoSave();
     return { id, record: full };
   }
 
   async read(table: string, id: string): Promise<Record<string, any> | null> {
+    await this.ensureInitialized();
     if (!this.knownTables.has(table)) return null;
-    const row = this.db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(id);
-    return row ? this.deserializeRow(row) : null;
+    const result = this.db!.exec(`SELECT * FROM "${table}" WHERE id = ?`, [id]);
+    if (result.length === 0 || result[0].values.length === 0) return null;
+    return this.resultRowToRecord(result[0].columns, result[0].values[0]);
   }
 
   async update(table: string, id: string, fields: Record<string, any>): Promise<Record<string, any>> {
+    await this.ensureInitialized();
     const existing = await this.read(table, id);
     if (!existing) {
       throw Object.assign(new Error(`Record "${id}" not found in "${table}"`), { type: "not_found" });
@@ -92,36 +145,43 @@ export class SQLiteDatabaseAdapter implements DatabaseAdapter {
     const values = updates.map(k => this.serialize(fields[k]));
     values.push(id);
 
-    this.db.prepare(`UPDATE "${table}" SET ${setClause} WHERE id = ?`).run(...values);
+    this.db!.run(`UPDATE "${table}" SET ${setClause} WHERE id = ?`, values);
 
+    this.autoSave();
     return (await this.read(table, id))!;
   }
 
   async delete(table: string, id: string): Promise<boolean> {
+    await this.ensureInitialized();
     if (!this.knownTables.has(table)) return false;
-    const result = this.db.prepare(`DELETE FROM "${table}" WHERE id = ?`).run(id);
-    return result.changes > 0;
+    this.db!.run(`DELETE FROM "${table}" WHERE id = ?`, [id]);
+    const modified = this.db!.getRowsModified() > 0;
+    if (modified) this.autoSave();
+    return modified;
   }
 
   async query(table: string, filter: QueryFilter): Promise<Record<string, any>[]> {
+    await this.ensureInitialized();
     if (!this.knownTables.has(table)) return [];
 
     const { whereClause, params } = this.buildWhere(filter);
-    const rows = this.db.prepare(`SELECT * FROM "${table}" WHERE ${whereClause}`).all(...params);
-    return rows.map((r: any) => this.deserializeRow(r));
+    const result = this.db!.exec(`SELECT * FROM "${table}" WHERE ${whereClause}`, params);
+    if (result.length === 0) return [];
+    return this.resultToRecords(result[0]);
   }
 
   async count(table: string, filter?: QueryFilter): Promise<number> {
+    await this.ensureInitialized();
     if (!this.knownTables.has(table)) return 0;
 
     if (!filter) {
-      const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM "${table}"`).get();
-      return row.cnt;
+      const result = this.db!.exec(`SELECT COUNT(*) as cnt FROM "${table}"`);
+      return result[0].values[0][0] as number;
     }
 
     const { whereClause, params } = this.buildWhere(filter);
-    const row = this.db.prepare(`SELECT COUNT(*) as cnt FROM "${table}" WHERE ${whereClause}`).get(...params);
-    return row.cnt;
+    const result = this.db!.exec(`SELECT COUNT(*) as cnt FROM "${table}" WHERE ${whereClause}`, params);
+    return result[0].values[0][0] as number;
   }
 
   async exists(table: string, filter: QueryFilter): Promise<boolean> {
@@ -130,25 +190,26 @@ export class SQLiteDatabaseAdapter implements DatabaseAdapter {
 
   // ── SQLite-specific ──────────────────────────────────────────────────────────
 
-  seed(table: string, data: Record<string, any>[]): void {
+  async seed(table: string, data: Record<string, any>[]): Promise<void> {
     if (data.length === 0) return;
+    await this.ensureInitialized();
 
-    // Ensure table with first record schema
     this.ensureTable(table, data[0]);
 
-    const insert = this.db.transaction((records: Record<string, any>[]) => {
-      for (const rec of records) {
-        const id = rec.id ?? randomUUID();
-        const full: Record<string, any> = { ...rec, id };
-        this.ensureColumns(table, full);
-        const columns = Object.keys(full);
-        const placeholders = columns.map(() => "?").join(", ");
-        const values = columns.map(c => this.serialize(full[c]));
-        this.db.prepare(`INSERT OR REPLACE INTO "${table}" (${columns.map(c => `"${c}"`).join(", ")}) VALUES (${placeholders})`).run(...values);
-      }
-    });
+    for (const rec of data) {
+      const id = rec.id ?? randomUUID();
+      const full: Record<string, any> = { ...rec, id };
+      this.ensureColumns(table, full);
+      const columns = Object.keys(full);
+      const placeholders = columns.map(() => "?").join(", ");
+      const values = columns.map(c => this.serialize(full[c]));
+      this.db!.run(
+        `INSERT OR REPLACE INTO "${table}" (${columns.map(c => `"${c}"`).join(", ")}) VALUES (${placeholders})`,
+        values
+      );
+    }
 
-    insert(data);
+    this.autoSave();
   }
 
   getPath(): string {
@@ -156,7 +217,27 @@ export class SQLiteDatabaseAdapter implements DatabaseAdapter {
   }
 
   close(): void {
-    this.db.close();
+    if (this.db) {
+      // Auto-save to file on close if file-based
+      if (this.dbPath !== ":memory:") {
+        try {
+          const fs = require("fs") as typeof import("fs");
+          const path = require("path") as typeof import("path");
+          const dir = path.dirname(this.dbPath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          const data = this.db.export();
+          fs.writeFileSync(this.dbPath, Buffer.from(data));
+        } catch {
+          // Best-effort save on close
+        }
+      }
+      this.db.close();
+      this.db = null;
+      this.initialized = false;
+      this.initPromise = null;
+    }
   }
 
   // ── Internals ────────────────────────────────────────────────────────────────
@@ -170,57 +251,62 @@ export class SQLiteDatabaseAdapter implements DatabaseAdapter {
       return `"${c}" TEXT`;
     }).join(", ");
 
-    this.db.prepare(`CREATE TABLE IF NOT EXISTS "${table}" (${colDefs})`).run();
+    this.db!.run(`CREATE TABLE IF NOT EXISTS "${table}" (${colDefs})`);
     this.knownTables.add(table);
   }
 
   private ensureColumns(table: string, record: Record<string, any>): void {
-    const existingCols = new Set(
-      this.db.prepare(`PRAGMA table_info("${table}")`).all().map((r: any) => r.name)
-    );
+    const result = this.db!.exec(`PRAGMA table_info("${table}")`);
+    const existingCols = new Set<string>();
+    if (result.length > 0) {
+      for (const row of result[0].values) {
+        existingCols.add(row[1] as string); // column name is at index 1
+      }
+    }
 
     for (const col of Object.keys(record)) {
       if (!existingCols.has(col)) {
-        this.db.prepare(`ALTER TABLE "${table}" ADD COLUMN "${col}" TEXT`).run();
+        this.db!.run(`ALTER TABLE "${table}" ADD COLUMN "${col}" TEXT`);
         existingCols.add(col);
       }
     }
   }
 
-  private serialize(value: any): string {
+  private serialize(value: any): any {
     if (value === null || value === undefined) return "";
     if (typeof value === "object") return JSON.stringify(value);
     return String(value);
   }
 
-  private deserializeRow(row: Record<string, any>): Record<string, any> {
+  private resultRowToRecord(columns: string[], values: any[]): Record<string, any> {
     const result: Record<string, any> = {};
-    for (const [key, val] of Object.entries(row)) {
-      if (val === null || val === "") {
-        result[key] = val;
-        continue;
-      }
-      // Try to parse as JSON (for objects/arrays)
-      if (typeof val === "string") {
-        if ((val.startsWith("{") && val.endsWith("}")) || (val.startsWith("[") && val.endsWith("]"))) {
-          try {
-            result[key] = JSON.parse(val);
-            continue;
-          } catch { /* not JSON, keep as string */ }
-        }
-        // Try to parse as number
-        const num = Number(val);
-        if (val !== "" && !isNaN(num) && String(num) === val) {
-          result[key] = num;
-          continue;
-        }
-        // Try to parse booleans
-        if (val === "true") { result[key] = true; continue; }
-        if (val === "false") { result[key] = false; continue; }
-      }
-      result[key] = val;
+    for (let i = 0; i < columns.length; i++) {
+      const key = columns[i];
+      const val = values[i];
+      result[key] = this.deserializeValue(val);
     }
     return result;
+  }
+
+  private resultToRecords(queryResult: { columns: string[]; values: any[][] }): Record<string, any>[] {
+    return queryResult.values.map(row => this.resultRowToRecord(queryResult.columns, row));
+  }
+
+  private deserializeValue(val: any): any {
+    if (val === null || val === "") return val;
+    if (typeof val === "string") {
+      // Try JSON parse for objects/arrays
+      if ((val.startsWith("{") && val.endsWith("}")) || (val.startsWith("[") && val.endsWith("]"))) {
+        try { return JSON.parse(val); } catch { /* not JSON */ }
+      }
+      // Try number
+      const num = Number(val);
+      if (val !== "" && !isNaN(num) && String(num) === val) return num;
+      // Booleans
+      if (val === "true") return true;
+      if (val === "false") return false;
+    }
+    return val;
   }
 
   private buildWhere(filter: QueryFilter): { whereClause: string; params: any[] } {

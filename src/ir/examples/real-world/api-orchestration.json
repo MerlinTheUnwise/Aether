@@ -17,6 +17,7 @@
         "role": { "type": "String", "domain": "auth" },
         "authenticated": { "type": "Bool" }
       },
+      "axioms": ["authenticated = true"],
       "contract": {
         "post": ["authenticated == true"]
       },
@@ -41,6 +42,7 @@
         "unit_price": { "type": "Float", "domain": "payment", "unit": "USD" },
         "total_price": { "type": "Float", "domain": "payment", "unit": "USD" }
       },
+      "axioms": ["available = true", "reserved = true", "total_price > 0"],
       "contract": {
         "post": ["available == true", "reserved == true", "total_price > 0"]
       },
@@ -64,6 +66,7 @@
         "charged": { "type": "Bool" },
         "amount": { "type": "Float", "domain": "payment", "unit": "USD" }
       },
+      "axioms": ["charged = true", "amount > 0"],
       "contract": {
         "post": ["charged == true", "amount > 0"]
       },
@@ -96,6 +99,7 @@
         "order_id": { "type": "String", "domain": "order" },
         "status": { "type": "String" }
       },
+      "axioms": ["status = \"confirmed\""],
       "contract": {
         "post": ["status == \"confirmed\""]
       },
@@ -120,6 +124,7 @@
         "tracking_number": { "type": "String", "domain": "shipping" },
         "estimated_delivery": { "type": "String" }
       },
+      "axioms": ["shipment_id.length > 0"],
       "contract": {
         "post": ["shipment_id.length > 0"]
       },
@@ -142,6 +147,7 @@
       "out": {
         "email_sent": { "type": "Bool" }
       },
+      "axioms": ["email_sent = true"],
       "contract": {
         "post": ["email_sent == true"]
       },
@@ -164,6 +170,7 @@
         "status_code": { "type": "Int" },
         "response": { "type": "Record" }
       },
+      "axioms": ["status_code = 200"],
       "contract": {
         "post": ["status_code == 200"]
       },

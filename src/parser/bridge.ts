@@ -84,6 +84,11 @@ function astToIR(astGraph: ASTGraph): AetherGraph {
     }
   }
 
+  // Pipeline properties
+  if (astGraph.pipelineProperties && astGraph.pipelineProperties.length > 0) {
+    (graph as any).pipeline_properties = astGraph.pipelineProperties;
+  }
+
   // Nodes
   for (const n of astGraph.nodes) {
     if (n.kind === "node") {
@@ -140,6 +145,10 @@ function astNodeToIR(node: ASTNode): AetherNode {
     for (const r of node.recovery) {
       irNode.recovery[r.condition] = recoveryToIR(r);
     }
+  }
+
+  if (node.axioms && node.axioms.length > 0) {
+    irNode.axioms = node.axioms;
   }
 
   if (node.adversarial && node.adversarial.length > 0) {
@@ -409,6 +418,11 @@ function irGraphToAST(graph: AetherGraph): ASTGraph {
 
   if (graph.partial) astGraph.partial = true;
 
+  // Pipeline properties
+  if ((graph as any).pipeline_properties && (graph as any).pipeline_properties.length > 0) {
+    astGraph.pipelineProperties = (graph as any).pipeline_properties;
+  }
+
   // Metadata
   if (graph.metadata || graph.sla) {
     astGraph.metadata = {};
@@ -493,6 +507,10 @@ function irNodeToAST(node: AetherNode): ASTNode {
 
   if (node.pure) {
     astNode.pure = true;
+  }
+
+  if (node.axioms && node.axioms.length > 0) {
+    astNode.axioms = node.axioms;
   }
 
   if (node.adversarial_check?.break_if) {

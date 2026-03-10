@@ -14,6 +14,7 @@
       "out": {
         "transactions": { "type": "List<Transaction>" }
       },
+      "axioms": ["output.transactions != null"],
       "contract": {
         "pre": ["input.query != null"],
         "post": ["output.transactions != null"]
@@ -32,6 +33,7 @@
         "validated": { "type": "List<Transaction>" },
         "invalid_count": { "type": "Number" }
       },
+      "axioms": ["output.validated != null", "output.invalid_count >= 0"],
       "contract": {
         "pre": ["input.transactions != null"],
         "post": ["output.validated != null", "output.invalid_count >= 0"]
@@ -105,6 +107,7 @@
         "report": { "type": "String" },
         "summary": { "type": "String" }
       },
+      "axioms": ["output.report != null", "output.report.length > 0"],
       "contract": {
         "pre": ["input.total != null", "input.transactions != null"],
         "post": ["output.report != null", "output.report.length > 0"]
@@ -122,6 +125,7 @@
       "out": {
         "sent": { "type": "Bool" }
       },
+      "axioms": ["output.sent = true"],
       "contract": {
         "pre": ["input.report != null"],
         "post": ["output.sent == true"]

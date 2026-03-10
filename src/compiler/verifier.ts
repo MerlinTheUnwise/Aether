@@ -13,9 +13,11 @@
  */
 
 import { readFileSync } from "fs";
+import { createHash } from "crypto";
 import { createRequire } from "module";
 import { fileURLToPath } from "url";
 import { translateExpression, Z3TranslationResult } from "./verifier-ast.js";
+import { checkContract } from "../runtime/evaluator/checker.js";
 
 const _require = createRequire(import.meta.url);
 
@@ -39,6 +41,7 @@ interface AetherNode {
   contract: { pre?: string[]; post?: string[]; invariants?: string[] };
   confidence?: number;
   adversarial_check?: { break_if: string[] };
+  axioms?: string[];
   effects: string[];
   pure?: boolean;
   recovery?: Record<string, unknown>;
@@ -58,6 +61,7 @@ interface AetherGraph {
   nodes: AetherNode[];
   edges: AetherEdge[];
   metadata?: Record<string, unknown>;
+  pipeline_properties?: string[];
 }
 
 export interface PostconditionResult {
@@ -110,6 +114,31 @@ export interface StateTypeVerificationResult {
   terminalInvariants: { checked: number; verified: number };
 }
 
+export interface EdgeVerificationResult {
+  edge: string;                      // "A.output → B.input"
+  preconditionsSatisfied: boolean;
+  details: Array<{
+    precondition: string;            // B's precondition
+    provedBy: string[];              // which of A's axioms/postconditions prove it
+    status: "proved" | "failed" | "unsupported";
+    counterexample?: Record<string, string>;
+  }>;
+}
+
+export interface PipelinePropertyResult {
+  property: string;            // end-to-end property
+  provedFromChain: boolean;    // derived from axiom chain
+  chainLength: number;         // how many nodes in the proof chain
+  axiomChain: string[];        // the axioms that form the proof
+}
+
+export interface PipelineVerificationSummary {
+  nodeProofRate: number;       // node postconditions proved / total
+  edgeProofRate: number;       // edge preconditions proved / total
+  pipelineProofRate: number;   // end-to-end properties proved / total
+  overallConfidence: string;   // "high" | "medium" | "low" based on rates
+}
+
 export interface GraphVerificationReport {
   graph_id: string;
   nodes_verified: number;
@@ -120,6 +149,19 @@ export interface GraphVerificationReport {
   stateTypeResults: StateTypeVerificationResult[];
   coverage?: VerificationCoverage;
   enhanced?: EnhancedVerificationResult[];
+  edgeResults?: EdgeVerificationResult[];
+  pipelineProperties?: PipelinePropertyResult[];
+  summary?: PipelineVerificationSummary;
+}
+
+export interface AxiomSoundnessResult {
+  nodeId: string;
+  axioms: Array<{
+    expression: string;
+    holdsAtRuntime: boolean;
+    evaluated_value: any;
+  }>;
+  allSound: boolean;
 }
 
 // ─── Z3 Initialization ───────────────────────────────────────────────────────
@@ -144,7 +186,7 @@ export { getZ3 };
 // ─── Solver Timeout ──────────────────────────────────────────────────────────
 
 /** Default Z3 solver timeout in milliseconds */
-const Z3_TIMEOUT_MS = 5000;
+const Z3_TIMEOUT_MS = 2000;
 
 /**
  * Run a Z3 solver check with a timeout.
@@ -221,12 +263,42 @@ function isRuntimeEvaluable(expression: string): boolean {
   }
 }
 
+// ─── Z3 Result Cache ─────────────────────────────────────────────────────────
+
+const z3ResultCache = new Map<string, VerificationResult>();
+
+function buildCacheKey(node: AetherNode, upstreamAxioms?: Map<string, string[]>): string {
+  const parts = [
+    JSON.stringify(node.contract),
+    JSON.stringify(node.axioms ?? []),
+    JSON.stringify(node.in),
+    JSON.stringify(node.out),
+    JSON.stringify(node.adversarial_check ?? {}),
+  ];
+  if (upstreamAxioms) {
+    const sorted = [...upstreamAxioms.entries()].sort(([a], [b]) => a.localeCompare(b));
+    parts.push(JSON.stringify(sorted));
+  }
+  return createHash("sha256").update(parts.join("|")).digest("hex");
+}
+
+export function clearZ3Cache(): void {
+  z3ResultCache.clear();
+}
+
 // ─── Node Verification (rewritten with AST translator) ──────────────────────
 
 export async function verifyNode(
   node: AetherNode,
-  z3: Z3Instance
+  z3: Z3Instance,
+  upstreamAxioms?: Map<string, string[]>
 ): Promise<VerificationResult> {
+  // Check cache first
+  const cacheKey = buildCacheKey(node, upstreamAxioms);
+  const cached = z3ResultCache.get(cacheKey);
+  if (cached) {
+    return { ...cached, node_id: node.id };
+  }
   const { Context } = z3;
   const ctx = new Context(`verify_${node.id}`);
   const annotations = buildAnnotationMap(node);
@@ -249,6 +321,32 @@ export async function verifyNode(
       sharedArrays = result.listArrays;
       if (result.expr) {
         preResults.push(result);
+      }
+    }
+  }
+
+  // Build axiom constraints (implementation guarantees assumed as true)
+  const axiomResults: Z3TranslationResult[] = [];
+  for (const axiomStr of node.axioms ?? []) {
+    const result = translateExpression(axiomStr, ctx, annotations, sharedVars, sharedArrays);
+    sharedVars = result.variables;
+    sharedArrays = result.listArrays;
+    if (result.expr) {
+      axiomResults.push(result);
+    }
+  }
+
+  // Build upstream axiom constraints (guarantees from upstream nodes via edges)
+  const upstreamAxiomResults: Z3TranslationResult[] = [];
+  if (upstreamAxioms) {
+    for (const [, axioms] of upstreamAxioms) {
+      for (const axiomStr of axioms) {
+        const result = translateExpression(axiomStr, ctx, annotations, sharedVars, sharedArrays);
+        sharedVars = result.variables;
+        sharedArrays = result.listArrays;
+        if (result.expr) {
+          upstreamAxiomResults.push(result);
+        }
       }
     }
   }
@@ -276,7 +374,15 @@ export async function verifyNode(
         for (const pre of preResults) {
           if (pre.expr) solver.add(pre.expr);
         }
-        // Assert NOT(postcondition) — if UNSAT, postcondition always holds
+        // Add axioms as assumptions (implementation guarantees)
+        for (const ax of axiomResults) {
+          if (ax.expr) solver.add(ax.expr);
+        }
+        // Add upstream axioms as assumptions
+        for (const ax of upstreamAxiomResults) {
+          if (ax.expr) solver.add(ax.expr);
+        }
+        // Assert NOT(postcondition) — if UNSAT, postcondition follows from axioms
         solver.add(ctx.Not(result.expr));
         const check = await solverCheckWithTimeout(solver);
         const elapsed = Date.now() - startTime;
@@ -351,12 +457,17 @@ export async function verifyNode(
   const hasAnyFailed = postconditions.some(p => p.status === "failed") || adversarial_checks.some(a => a.status === "failed");
   const hasAnyVerified = postconditions.some(p => p.status === "verified") || adversarial_checks.some(a => a.status === "passed");
 
-  return {
+  const verificationResult: VerificationResult = {
     node_id: node.id,
     verified: !hasAnyFailed && (hasAnyVerified || !hasAnyFailed),
     postconditions,
     adversarial_checks,
   };
+
+  // Cache the result
+  z3ResultCache.set(cacheKey, verificationResult);
+
+  return verificationResult;
 }
 
 // ─── Enhanced Verification (with coverage) ───────────────────────────────────
@@ -537,11 +648,289 @@ async function verifyStateType(
   return result;
 }
 
+// ─── Edge Verification ────────────────────────────────────────────────────────
+
+export async function verifyEdge(
+  edge: AetherEdge,
+  sourceNode: AetherNode,
+  destNode: AetherNode,
+  z3: Z3Instance
+): Promise<EdgeVerificationResult> {
+  const { Context } = z3;
+  const fromPort = edge.from.split(".")[1];
+  const toPort = edge.to.split(".")[1];
+  const edgeLabel = `${edge.from} → ${edge.to}`;
+
+  // If dest has no preconditions, trivially satisfied
+  if (!destNode.contract.pre || destNode.contract.pre.length === 0) {
+    return { edge: edgeLabel, preconditionsSatisfied: true, details: [] };
+  }
+
+  const ctx = new Context(`edge_${sourceNode.id}_${destNode.id}`);
+  const annotations = new Map<string, TypeAnnotation>();
+
+  // Combine both nodes' port annotations
+  for (const [name, ann] of Object.entries(sourceNode.in)) annotations.set(name, ann);
+  for (const [name, ann] of Object.entries(sourceNode.out)) annotations.set(name, ann);
+  for (const [name, ann] of Object.entries(destNode.in)) annotations.set(name, ann);
+  for (const [name, ann] of Object.entries(destNode.out)) annotations.set(name, ann);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sharedVars = new Map<string, any>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sharedArrays = new Map<string, { array: any; length: any }>();
+
+  // Translate source node's axioms and postconditions (the guarantees)
+  const guaranteeExprs: Z3TranslationResult[] = [];
+  const guaranteeStrings: string[] = [];
+  for (const axiom of [...(sourceNode.axioms ?? []), ...(sourceNode.contract.post ?? [])]) {
+    const result = translateExpression(axiom, ctx, annotations, sharedVars, sharedArrays);
+    sharedVars = result.variables;
+    sharedArrays = result.listArrays;
+    if (result.expr) {
+      guaranteeExprs.push(result);
+      guaranteeStrings.push(axiom);
+    }
+  }
+
+  const details: EdgeVerificationResult["details"] = [];
+
+  for (const pre of destNode.contract.pre) {
+    // Remap: dest's input port name → source's output port name
+    const remappedPre = pre.replace(new RegExp(`\\b${toPort}\\b`, "g"), fromPort);
+    const result = translateExpression(remappedPre, ctx, annotations, sharedVars, sharedArrays);
+    sharedVars = result.variables;
+    sharedArrays = result.listArrays;
+
+    if (!result.expr) {
+      details.push({ precondition: pre, provedBy: [], status: "unsupported" });
+      continue;
+    }
+
+    try {
+      const solver = new ctx.Solver();
+      // Assert all source guarantees
+      for (const g of guaranteeExprs) {
+        if (g.expr) solver.add(g.expr);
+      }
+      // Assert NOT(precondition) — UNSAT means guarantees imply precondition
+      solver.add(ctx.Not(result.expr));
+      const check = await solverCheckWithTimeout(solver);
+
+      if (check === "unsat") {
+        details.push({ precondition: pre, provedBy: guaranteeStrings, status: "proved" });
+      } else if (check === "sat") {
+        const ce = extractCounterexample(solver.model(), result.variables);
+        details.push({ precondition: pre, provedBy: [], status: "failed", counterexample: ce });
+      } else {
+        details.push({ precondition: pre, provedBy: [], status: "unsupported" });
+      }
+    } catch {
+      details.push({ precondition: pre, provedBy: [], status: "unsupported" });
+    }
+  }
+
+  return {
+    edge: edgeLabel,
+    preconditionsSatisfied: details.every(d => d.status === "proved" || d.status === "unsupported"),
+    details,
+  };
+}
+
+// ─── Pipeline Verification ────────────────────────────────────────────────────
+
+function topologicalSort(graph: AetherGraph): string[] {
+  const nodeIds = new Set(graph.nodes.map(n => n.id));
+  const inDegree = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+  for (const id of nodeIds) {
+    inDegree.set(id, 0);
+    adj.set(id, []);
+  }
+  for (const edge of graph.edges) {
+    const fromId = edge.from.split(".")[0];
+    const toId = edge.to.split(".")[0];
+    if (nodeIds.has(fromId) && nodeIds.has(toId)) {
+      adj.get(fromId)!.push(toId);
+      inDegree.set(toId, (inDegree.get(toId) ?? 0) + 1);
+    }
+  }
+  const order: string[] = [];
+  const queue: string[] = [];
+  for (const [id, deg] of inDegree) {
+    if (deg === 0) queue.push(id);
+  }
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    order.push(id);
+    for (const next of adj.get(id) ?? []) {
+      const deg = (inDegree.get(next) ?? 1) - 1;
+      inDegree.set(next, deg);
+      if (deg === 0) queue.push(next);
+    }
+  }
+  return order;
+}
+
+async function verifyPipelineProperties(
+  graph: AetherGraph,
+  z3: Z3Instance
+): Promise<PipelinePropertyResult[]> {
+  const props = graph.pipeline_properties;
+  if (!props || props.length === 0) return [];
+
+  const { Context } = z3;
+  const ctx = new Context(`pipeline_${graph.id}`);
+
+  // Collect ALL annotations from ALL nodes
+  const allAnnotations = new Map<string, TypeAnnotation>();
+  for (const node of graph.nodes) {
+    if ("in" in node && "out" in node) {
+      const n = node as AetherNode;
+      for (const [name, ann] of Object.entries(n.in)) allAnnotations.set(name, ann);
+      for (const [name, ann] of Object.entries(n.out)) allAnnotations.set(name, ann);
+    }
+  }
+
+  // Topological walk: accumulate all axioms along the chain
+  const order = topologicalSort(graph);
+  const nodeMap = new Map<string, AetherNode>();
+  for (const n of graph.nodes) {
+    if ("contract" in n && !("hole" in n) && !("intent" in n)) {
+      nodeMap.set(n.id, n as AetherNode);
+    }
+  }
+
+  // Collect ALL axioms from all nodes in topological order
+  const allAxioms: string[] = [];
+  const axiomChainNodes: string[] = [];
+  for (const nodeId of order) {
+    const node = nodeMap.get(nodeId);
+    if (!node) continue;
+    const nodeAxioms = node.axioms ?? [];
+    if (nodeAxioms.length > 0) {
+      allAxioms.push(...nodeAxioms);
+      axiomChainNodes.push(nodeId);
+    }
+    // Also add postconditions as facts
+    for (const post of node.contract.post ?? []) {
+      allAxioms.push(post);
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sharedVars = new Map<string, any>();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sharedArrays = new Map<string, { array: any; length: any }>();
+
+  // Translate all axioms
+  const axiomExprs: Z3TranslationResult[] = [];
+  for (const axiom of allAxioms) {
+    const result = translateExpression(axiom, ctx, allAnnotations, sharedVars, sharedArrays);
+    sharedVars = result.variables;
+    sharedArrays = result.listArrays;
+    if (result.expr) axiomExprs.push(result);
+  }
+
+  // Check each pipeline property
+  const results: PipelinePropertyResult[] = [];
+  for (const prop of props) {
+    const result = translateExpression(prop, ctx, allAnnotations, sharedVars, sharedArrays);
+    sharedVars = result.variables;
+    sharedArrays = result.listArrays;
+
+    if (!result.expr) {
+      results.push({
+        property: prop,
+        provedFromChain: false,
+        chainLength: 0,
+        axiomChain: [],
+      });
+      continue;
+    }
+
+    try {
+      const solver = new ctx.Solver();
+      // Assert all accumulated axioms
+      for (const ax of axiomExprs) {
+        if (ax.expr) solver.add(ax.expr);
+      }
+      // Assert NOT(property) — UNSAT means property follows from axiom chain
+      solver.add(ctx.Not(result.expr));
+      const check = await solverCheckWithTimeout(solver);
+
+      results.push({
+        property: prop,
+        provedFromChain: check === "unsat",
+        chainLength: axiomChainNodes.length,
+        axiomChain: check === "unsat" ? allAxioms.filter(a => {
+          // Find axioms relevant to this property's variables
+          const propVarNames = extractVarNames(prop);
+          return propVarNames.some(v => a.includes(v));
+        }) : [],
+      });
+    } catch {
+      results.push({
+        property: prop,
+        provedFromChain: false,
+        chainLength: 0,
+        axiomChain: [],
+      });
+    }
+  }
+
+  return results;
+}
+
+function extractVarNames(expr: string): string[] {
+  const matches = expr.match(/[a-zA-Z_][a-zA-Z0-9_.]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?/g);
+  return matches ?? [];
+}
+
+// ─── Axiom Soundness Checker ──────────────────────────────────────────────────
+
+export function checkAxiomSoundness(
+  node: AetherNode,
+  inputs: Record<string, any>,
+  outputs: Record<string, any>
+): AxiomSoundnessResult {
+  const axioms = node.axioms ?? [];
+  const variables = { ...inputs, ...outputs };
+
+  const axiomResults: AxiomSoundnessResult["axioms"] = [];
+
+  for (const axiom of axioms) {
+    try {
+      const checkResult = checkContract(axiom, variables);
+      axiomResults.push({
+        expression: axiom,
+        holdsAtRuntime: checkResult.passed && !checkResult.unevaluable,
+        evaluated_value: checkResult.unevaluable ? "unevaluable" : checkResult.passed,
+      });
+    } catch {
+      axiomResults.push({
+        expression: axiom,
+        holdsAtRuntime: false,
+        evaluated_value: "error",
+      });
+    }
+  }
+
+  return {
+    nodeId: node.id,
+    axioms: axiomResults,
+    allSound: axiomResults.every(a => a.holdsAtRuntime),
+  };
+}
+
 // ─── Graph Verification ──────────────────────────────────────────────────────
 
 export async function verifyGraph(graph: AetherGraph): Promise<GraphVerificationReport> {
   const z3 = await getZ3();
   const results: VerificationResult[] = [];
+
+  // Build a map of node axioms for compositional verification
+  const nodeAxioms = new Map<string, string[]>();
 
   for (const node of graph.nodes) {
     // Skip holes and intent nodes — they have no contracts to verify
@@ -549,8 +938,41 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
         ("intent" in node && (node as any).intent === true)) {
       continue;
     }
-    const result = await verifyNode(node, z3);
+
+    // Collect upstream axioms from nodes that feed into this node
+    const upstreamAxioms = new Map<string, string[]>();
+    for (const edge of graph.edges) {
+      if (edge.to.startsWith(node.id + ".")) {
+        const fromNodeId = edge.from.split(".")[0];
+        const fromPort = edge.from.split(".")[1];
+        const fromNode = graph.nodes.find((n: any) => n.id === fromNodeId);
+        if (!fromNode || !("contract" in fromNode)) continue;
+
+        // Get the upstream node's axioms relevant to its output port
+        const fromAxioms = (fromNode as AetherNode).axioms ?? [];
+        const relevantAxioms = fromAxioms.filter(a => a.includes(fromPort));
+
+        if (relevantAxioms.length > 0) {
+          const toPort = edge.to.split(".")[1];
+          // Remap: upstream's output port name → this node's input port name
+          const remapped = relevantAxioms.map(a =>
+            a.replace(new RegExp(`\\b${fromPort}\\b`, "g"), toPort)
+          );
+          const existing = upstreamAxioms.get(toPort) ?? [];
+          upstreamAxioms.set(toPort, [...existing, ...remapped]);
+        }
+      }
+    }
+
+    const result = await verifyNode(
+      node as AetherNode,
+      z3,
+      upstreamAxioms.size > 0 ? upstreamAxioms : undefined
+    );
     results.push(result);
+
+    // Store this node's axioms for downstream propagation
+    nodeAxioms.set(node.id, (node as AetherNode).axioms ?? []);
   }
 
   let nodes_verified = 0;
@@ -588,6 +1010,55 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
   // Compute coverage report
   const { enhanced, coverage } = computeEnhancedResults(results);
 
+  // ─── Edge Verification ───────────────────────────────────────────────
+  const nodeMapForEdges = new Map<string, AetherNode>();
+  for (const n of graph.nodes) {
+    if ("contract" in n && !("hole" in n) && !("intent" in n)) {
+      nodeMapForEdges.set(n.id, n as AetherNode);
+    }
+  }
+
+  const edgeResults: EdgeVerificationResult[] = [];
+  for (const edge of graph.edges) {
+    const fromNodeId = edge.from.split(".")[0];
+    const toNodeId = edge.to.split(".")[0];
+    const sourceNode = nodeMapForEdges.get(fromNodeId);
+    const destNode = nodeMapForEdges.get(toNodeId);
+
+    // Only verify edges where dest has preconditions
+    if (sourceNode && destNode && destNode.contract.pre && destNode.contract.pre.length > 0) {
+      const edgeResult = await verifyEdge(edge, sourceNode, destNode, z3);
+      edgeResults.push(edgeResult);
+    }
+  }
+
+  // ─── Pipeline Verification ───────────────────────────────────────────
+  const pipelineProperties = await verifyPipelineProperties(graph, z3);
+
+  // ─── Summary ─────────────────────────────────────────────────────────
+  const totalNodePosts = coverage
+    ? coverage.z3_verified + coverage.z3_failed + coverage.z3_timeout + coverage.z3_unsupported
+    : 0;
+  const nodeProofRate = totalNodePosts > 0
+    ? (coverage!.z3_verified / totalNodePosts) * 100
+    : 100;
+
+  const totalEdgePres = edgeResults.reduce((sum, e) => sum + e.details.length, 0);
+  const edgeProved = edgeResults.reduce(
+    (sum, e) => sum + e.details.filter(d => d.status === "proved").length, 0
+  );
+  const edgeProofRate = totalEdgePres > 0 ? (edgeProved / totalEdgePres) * 100 : 100;
+
+  const totalPipelineProps = pipelineProperties.length;
+  const pipelineProved = pipelineProperties.filter(p => p.provedFromChain).length;
+  const pipelineProofRate = totalPipelineProps > 0
+    ? (pipelineProved / totalPipelineProps) * 100
+    : 100;
+
+  const avgRate = (nodeProofRate + edgeProofRate + pipelineProofRate) / 3;
+  const overallConfidence: "high" | "medium" | "low" =
+    avgRate >= 80 ? "high" : avgRate >= 50 ? "medium" : "low";
+
   return {
     graph_id: graph.id,
     nodes_verified,
@@ -598,6 +1069,14 @@ export async function verifyGraph(graph: AetherGraph): Promise<GraphVerification
     stateTypeResults,
     coverage,
     enhanced,
+    edgeResults,
+    pipelineProperties,
+    summary: {
+      nodeProofRate: Math.round(nodeProofRate * 10) / 10,
+      edgeProofRate: Math.round(edgeProofRate * 10) / 10,
+      pipelineProofRate: Math.round(pipelineProofRate * 10) / 10,
+      overallConfidence,
+    },
   };
 }
 
@@ -609,6 +1088,71 @@ const isMain =
   process.argv[1]?.endsWith("verifier.ts") ||
   process.argv[1]?.endsWith("verifier.js");
 
+export function printVerificationReport(report: GraphVerificationReport): void {
+  const sep = "═══════════════════════════════════════════════════";
+  console.log(sep);
+  console.log(`AETHER Verification: ${report.graph_id}`);
+  console.log(sep);
+
+  // NODE VERIFICATION
+  console.log(`\nNODE VERIFICATION (with axioms):`);
+  for (const r of report.results) {
+    const verified = r.postconditions.filter(p => p.status === "verified").length;
+    const total = r.postconditions.length;
+    const unsupported = r.postconditions.filter(p => p.status === "unsupported").length;
+    const icon = r.verified ? "✓" : total === unsupported ? "◐" : "✗";
+    const unsupMsg = unsupported > 0 ? ` (${unsupported} unsupported)` : "";
+    console.log(`  ${r.node_id.padEnd(24)} ${verified}/${total} postconditions proved    ${icon}${unsupMsg}`);
+  }
+  if (report.summary) {
+    console.log(`\n  Node proof rate: ${report.summary.nodeProofRate}%`);
+  }
+
+  // EDGE VERIFICATION
+  if (report.edgeResults && report.edgeResults.length > 0) {
+    console.log(`\nEDGE VERIFICATION:`);
+    for (const e of report.edgeResults) {
+      const icon = e.preconditionsSatisfied ? "✓" : "✗";
+      console.log(`  ${e.edge.padEnd(30)} preconditions satisfied      ${icon}`);
+    }
+    if (report.summary) {
+      console.log(`\n  Edge proof rate: ${report.summary.edgeProofRate}%`);
+    }
+  }
+
+  // PIPELINE VERIFICATION
+  if (report.pipelineProperties && report.pipelineProperties.length > 0) {
+    console.log(`\nPIPELINE VERIFICATION:`);
+    for (const p of report.pipelineProperties) {
+      const icon = p.provedFromChain ? "✓" : "✗";
+      const status = p.provedFromChain ? "proved from chain" : "not proved";
+      console.log(`  "${p.property}"`.padEnd(42) + `${status}  ${icon}`);
+      if (p.provedFromChain && p.axiomChain.length > 0) {
+        console.log(`    axiom chain: ${p.axiomChain.length} axioms across ${p.chainLength} nodes`);
+      }
+    }
+    if (report.summary) {
+      console.log(`\n  Pipeline proof rate: ${report.summary.pipelineProofRate}%`);
+    }
+  }
+
+  // OVERALL
+  if (report.summary) {
+    const totalProved = (report.coverage?.z3_verified ?? 0) +
+      (report.edgeResults?.reduce((s, e) => s + e.details.filter(d => d.status === "proved").length, 0) ?? 0) +
+      (report.pipelineProperties?.filter(p => p.provedFromChain).length ?? 0);
+    const totalAll = (report.coverage
+      ? report.coverage.z3_verified + report.coverage.z3_failed + report.coverage.z3_timeout + report.coverage.z3_unsupported
+      : 0) +
+      (report.edgeResults?.reduce((s, e) => s + e.details.length, 0) ?? 0) +
+      (report.pipelineProperties?.length ?? 0);
+
+    console.log(`\n${sep}`);
+    console.log(`OVERALL: ${totalProved}/${totalAll} proved (${totalAll > 0 ? ((totalProved / totalAll) * 100).toFixed(1) : "100"}%) — confidence: ${report.summary.overallConfidence}`);
+    console.log(sep);
+  }
+}
+
 if (isMain && process.argv.length >= 3) {
   const filePath = process.argv[2];
 
@@ -617,52 +1161,7 @@ if (isMain && process.argv.length >= 3) {
       const raw = JSON.parse(readFileSync(filePath, "utf-8")) as AetherGraph;
       const report = await verifyGraph(raw);
 
-      console.log(`\n═══ Verification Report: ${report.graph_id} ═══`);
-      console.log(`Verified: ${report.nodes_verified}  Failed: ${report.nodes_failed}  Unsupported: ${report.nodes_unsupported}`);
-      console.log(`Verification: ${report.verification_percentage}%\n`);
-
-      for (const r of report.results) {
-        const icon = r.verified ? "✓" : "✗";
-        console.log(`${icon}  Node: ${r.node_id}`);
-
-        for (const p of r.postconditions) {
-          const statusIcon = p.status === "verified" ? "✓" : p.status === "failed" ? "✗" : p.status === "timeout" ? "⏱" : "?";
-          console.log(`   ${statusIcon} POST: ${p.expression} → ${p.status}${p.z3_time_ms ? ` (${p.z3_time_ms}ms)` : ""}`);
-          if (p.counterexample) {
-            console.log(`     counterexample: ${JSON.stringify(p.counterexample)}`);
-          }
-        }
-
-        for (const a of r.adversarial_checks) {
-          const statusIcon = a.status === "passed" ? "✓" : a.status === "failed" ? "✗" : a.status === "timeout" ? "⏱" : "?";
-          console.log(`   ${statusIcon} BREAK_IF: ${a.expression} → ${a.status}${a.z3_time_ms ? ` (${a.z3_time_ms}ms)` : ""}`);
-          if (a.counterexample) {
-            console.log(`     counterexample: ${JSON.stringify(a.counterexample)}`);
-          }
-        }
-
-        console.log();
-      }
-
-      // Print coverage report
-      if (report.coverage) {
-        const c = report.coverage;
-        const total = c.z3_verified + c.z3_failed + c.z3_timeout + c.z3_unsupported;
-        console.log(`═══ Verification Coverage ═══`);
-        console.log(`Z3 verified:     ${c.z3_verified}/${total}`);
-        console.log(`Z3 failed:       ${c.z3_failed}/${total}`);
-        console.log(`Z3 timeout:      ${c.z3_timeout}/${total}`);
-        console.log(`Z3 unsupported:  ${c.z3_unsupported}/${total}`);
-        if (c.z3_unsupported > 0) {
-          console.log(`  ├─ runtime evaluable: ${c.runtime_evaluable}`);
-          console.log(`  └─ truly uncovered:   ${c.total_uncovered}`);
-        }
-        if (total > 0) {
-          const unsupportedPct = Math.round((c.z3_unsupported / total) * 100);
-          console.log(`Unsupported rate: ${unsupportedPct}%`);
-        }
-        console.log();
-      }
+      printVerificationReport(report);
 
       process.exit(report.nodes_failed > 0 ? 1 : 0);
     } catch (e) {

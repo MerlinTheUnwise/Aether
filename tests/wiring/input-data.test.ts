@@ -36,7 +36,7 @@ describe("Input Data Files", () => {
       expect(tables.length).toBeGreaterThan(0);
 
       // Create a service container with this seed
-      const services = ServiceContainer.createDefault({
+      const services = await ServiceContainer.createDefault({
         database: { seed },
       });
 

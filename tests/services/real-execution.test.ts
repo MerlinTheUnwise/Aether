@@ -7,12 +7,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { execute, createExecutionContext } from "../../src/runtime/executor.js";
-import { SQLiteDatabaseAdapter, isSQLiteAvailable } from "../../src/implementations/services/database-sqlite.js";
+import { SQLiteDatabaseAdapter } from "../../src/implementations/services/database-sqlite.js";
 import { RealFilesystemAdapter } from "../../src/implementations/services/filesystem-real.js";
 import { readFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 
-describe.skipIf(!isSQLiteAvailable)("Real Execution — SQLite", () => {
+describe("Real Execution — SQLite", () => {
   const testDir = join(process.cwd(), "test-output", "real-exec-" + process.pid);
 
   beforeEach(() => {
@@ -124,10 +124,10 @@ describe.skipIf(!isSQLiteAvailable)("Real Execution — SQLite", () => {
 });
 
 describe("Real Execution — Container Mode Switch", () => {
-  it.skipIf(!isSQLiteAvailable)("ServiceContainer in real mode creates SQLite adapter", async () => {
+  it("ServiceContainer in real mode creates SQLite adapter", async () => {
     const { ServiceContainer } = await import("../../src/implementations/services/container.js");
 
-    const container = ServiceContainer.createDefault({
+    const container = await ServiceContainer.createDefault({
       mode: "real",
       database: {
         seed: { items: [{ id: "i1", name: "Test" }] },
@@ -148,7 +148,7 @@ describe("Real Execution — Container Mode Switch", () => {
   it("ServiceContainer in mock mode (default) creates AetherDatabase", async () => {
     const { ServiceContainer } = await import("../../src/implementations/services/container.js");
 
-    const container = ServiceContainer.createDefault({
+    const container = await ServiceContainer.createDefault({
       database: {
         seed: { items: [{ id: "i1", name: "Test" }] },
       },

@@ -18,7 +18,7 @@ import { fileURLToPath } from "url";
 import { createInterface } from "readline";
 import { validateGraph } from "./ir/validator.js";
 import { checkTypes } from "./compiler/checker.js";
-import { verifyGraph, type GraphVerificationReport } from "./compiler/verifier.js";
+import { verifyGraph, printVerificationReport, type GraphVerificationReport } from "./compiler/verifier.js";
 import { transpileGraph, transpileToFile } from "./compiler/transpiler.js";
 import { IncrementalBuilder } from "./compiler/incremental.js";
 import { instantiateTemplate, validateTemplate } from "./compiler/templates.js";
@@ -181,10 +181,7 @@ async function cmdVerify(filePath: string): Promise<GraphVerificationReport> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const report = await verifyGraph(graph as any);
 
-  console.log(`Verification: ${report.nodes_verified}/${report.nodes_verified + report.nodes_failed} nodes verified (${report.verification_percentage}%)`);
-  if (report.nodes_unsupported > 0) {
-    console.log(`             ${report.nodes_unsupported}/${report.results.length} unsupported expressions`);
-  }
+  printVerificationReport(report);
 
   return report;
 }

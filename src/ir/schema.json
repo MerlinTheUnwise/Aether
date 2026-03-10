@@ -97,6 +97,12 @@
       "type": "array",
       "items": { "$ref": "#/definitions/Scope" },
       "default": []
+    },
+    "pipeline_properties": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "End-to-end properties that should hold across the entire pipeline, proved from axiom chains"
     }
   },
   "definitions": {
@@ -310,6 +316,11 @@
           "type": "object",
           "additionalProperties": { "$ref": "#/definitions/RecoveryAction" },
           "description": "Named recovery strategies keyed by failure mode"
+        },
+        "axioms": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Implementation guarantees that Z3 can assume as true. These describe what the implementation DOES, enabling Z3 to prove that postconditions follow from axioms."
         },
         "supervised": {
           "$ref": "#/definitions/SupervisedBlock",

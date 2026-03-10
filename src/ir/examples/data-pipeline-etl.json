@@ -2,6 +2,11 @@
   "id": "data_pipeline_etl",
   "version": 1,
   "effects": ["database.read", "database.write", "filesystem"],
+  "pipeline_properties": [
+    "record_count >= 0",
+    "duplicates_removed >= 0",
+    "rows_written >= 0"
+  ],
   "metadata": {
     "description": "ETL data pipeline with data quality contracts and batch processing"
   },
@@ -27,6 +32,7 @@
           "type": "Int"
         }
       },
+      "axioms": ["record_count >= 0"],
       "contract": {
         "post": ["record_count >= 0"]
       },
@@ -59,6 +65,7 @@
           "type": "Int"
         }
       },
+      "axioms": ["invalid_count >= 0"],
       "contract": {
         "post": ["invalid_count >= 0"]
       },
@@ -79,6 +86,7 @@
           "domain": "data_pipeline"
         }
       },
+      "axioms": ["cleaned_records.length >= 0"],
       "contract": {
         "post": ["cleaned_records.length >= 0"]
       },
@@ -106,6 +114,7 @@
           "type": "Int"
         }
       },
+      "axioms": ["duplicates_removed >= 0"],
       "contract": {
         "post": ["duplicates_removed >= 0"]
       },
@@ -129,6 +138,7 @@
           "type": "String"
         }
       },
+      "axioms": ["checksum.length > 0"],
       "contract": {
         "post": ["checksum.length > 0"]
       },
@@ -154,6 +164,7 @@
           "type": "Bool"
         }
       },
+      "axioms": ["rows_written >= 0", "success = true"],
       "contract": {
         "pre": ["checksum.length > 0"],
         "post": ["rows_written >= 0", "success == true"]

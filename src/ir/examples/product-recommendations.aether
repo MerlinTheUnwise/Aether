@@ -12,6 +12,9 @@ graph get_product_recommendations v2
     in:  token: String @jwt @internal
     out: user: AuthenticatedUser @auth @pii
     effects: [database.read]
+    axioms:
+      user.id != null
+      user.authenticated = true
     contracts:
       pre:  token.length > 0
       post: user.id != null

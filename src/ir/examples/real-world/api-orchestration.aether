@@ -14,6 +14,8 @@ graph api_orchestration v1
     in:  token: String
     out: user_id: String, role: String, authenticated: Bool
     effects: [auth.verify]
+    axioms:
+      authenticated = true
     contracts:
       post: authenticated == true
     recovery:
@@ -24,6 +26,10 @@ graph api_orchestration v1
     in:  product_id: String, quantity: Int @range(1, 1000), user_id: String
     out: available: Bool, reserved: Bool, unit_price: Float @payment @USD, total_price: Float @payment @USD
     effects: [database.read, database.write]
+    axioms:
+      available = true
+      reserved = true
+      total_price > 0
     contracts:
       post: available == true
       post: reserved == true
@@ -36,6 +42,9 @@ graph api_orchestration v1
     in:  user_id: String, total_price: Float @payment @USD, product_id: String
     out: payment_id: String @payment, charged: Bool, amount: Float @payment @USD
     effects: [payment_gateway.write]
+    axioms:
+      charged = true
+      amount > 0
     contracts:
       post: charged == true
       post: amount > 0
@@ -51,6 +60,8 @@ graph api_orchestration v1
     in:  user_id: String, product_id: String, quantity: Int, payment_id: String @payment, total_price: Float @payment @USD
     out: order_id: String, status: String
     effects: [database.write]
+    axioms:
+      status = "confirmed"
     contracts:
       post: status == "confirmed"
     recovery:
@@ -61,6 +72,8 @@ graph api_orchestration v1
     in:  order_id: String, user_id: String, product_id: String, quantity: Int
     out: shipment_id: String, tracking_number: String, estimated_delivery: String
     effects: [shipping.write, database.write]
+    axioms:
+      shipment_id.length > 0
     contracts:
       post: shipment_id.length > 0
     recovery:
@@ -71,6 +84,8 @@ graph api_orchestration v1
     in:  user_id: String, order_id: String, tracking_number: String, total_price: Float @payment @USD
     out: email_sent: Bool
     effects: [email]
+    axioms:
+      email_sent = true
     contracts:
       post: email_sent == true
     recovery:
@@ -80,6 +95,8 @@ graph api_orchestration v1
   node respond_success
     in:  order_id: String, shipment_id: String, email_sent: Bool
     out: status_code: Int, response: Record
+    axioms:
+      status_code = 200
     contracts:
       post: status_code == 200
     pure

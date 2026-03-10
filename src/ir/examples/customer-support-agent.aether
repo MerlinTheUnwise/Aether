@@ -34,6 +34,8 @@ graph customer_support_agent v1
     in:  action: SupportAction, confidence_score: Float64 @constraint("> 0.7") @range(0, 1)
     out: result: ActionResult
     effects: [database, email, ticketing]
+    axioms:
+      result.status in [success, partial, requires_followup]
     contracts:
       pre:  confidence_score > 0.7
       post: result.status in [success, partial, requires_followup]

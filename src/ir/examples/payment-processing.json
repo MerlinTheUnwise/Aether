@@ -2,6 +2,10 @@
   "id": "payment_processing",
   "version": 1,
   "effects": ["payment_gateway.write", "database.write", "email"],
+  "pipeline_properties": [
+    "receipt_sent = true",
+    "captured_amount > 0"
+  ],
   "metadata": {
     "description": "Payment processing pipeline with temporal state transitions and complex recovery chains",
     "safety_level": "high"
@@ -42,6 +46,10 @@
           "domain": "payment"
         }
       },
+      "axioms": [
+        "validated_amount = amount",
+        "status = created"
+      ],
       "contract": {
         "pre": ["amount > 0", "card_token.length > 0"],
         "post": ["validated_amount == amount", "status == created"]
@@ -84,6 +92,11 @@
           "domain": "payment"
         }
       },
+      "axioms": [
+        "authorized_amount = validated_amount",
+        "status = authorized",
+        "authorization_code.length > 0"
+      ],
       "contract": {
         "pre": ["validated_amount > 0"],
         "post": ["authorized_amount == validated_amount", "status == authorized", "authorization_code.length > 0"],
@@ -145,6 +158,10 @@
           "domain": "payment"
         }
       },
+      "axioms": [
+        "captured_amount = authorized_amount",
+        "status = captured"
+      ],
       "contract": {
         "pre": ["authorization_code.length > 0", "authorized_amount > 0"],
         "post": ["captured_amount == authorized_amount", "status == captured"],
@@ -189,6 +206,9 @@
           "type": "Bool"
         }
       },
+      "axioms": [
+        "receipt_sent = true"
+      ],
       "contract": {
         "post": ["receipt_sent == true"]
       },

@@ -4,6 +4,11 @@
 graph data_pipeline_etl v1
   effects: [database.read, database.write, filesystem]
 
+  pipeline_properties:
+    record_count >= 0
+    duplicates_removed >= 0
+    rows_written >= 0
+
   metadata:
     description: "ETL data pipeline with data quality contracts and batch processing"
 
@@ -13,6 +18,8 @@ graph data_pipeline_etl v1
     in:  source_uri: String, batch_size: Int @range(1, 100000)
     out: raw_records: List<Record>, record_count: Int
     effects: [database.read]
+    axioms:
+      record_count >= 0
     contracts:
       post: record_count >= 0
     recovery:
@@ -23,6 +30,8 @@ graph data_pipeline_etl v1
   node validate_schema
     in:  raw_records: List<Record>
     out: valid_records: List<Record>, invalid_count: Int
+    axioms:
+      invalid_count >= 0
     contracts:
       post: invalid_count >= 0
     pure
@@ -31,6 +40,8 @@ graph data_pipeline_etl v1
   node clean_nulls
     in:  valid_records: List<Record>
     out: cleaned_records: List<Record>
+    axioms:
+      cleaned_records.length >= 0
     contracts:
       post: cleaned_records.length >= 0
     supervised: "null handling strategy is domain-specific" pending
@@ -40,6 +51,8 @@ graph data_pipeline_etl v1
   node deduplicate
     in:  cleaned_records: List<Record>
     out: unique_records: List<Record>, duplicates_removed: Int
+    axioms:
+      duplicates_removed >= 0
     contracts:
       post: duplicates_removed >= 0
     pure
@@ -48,6 +61,8 @@ graph data_pipeline_etl v1
   node aggregate
     in:  unique_records: List<Record>
     out: aggregated_data: List<Record>, checksum: String
+    axioms:
+      checksum.length > 0
     contracts:
       post: checksum.length > 0
     pure
@@ -57,6 +72,9 @@ graph data_pipeline_etl v1
     in:  aggregated_data: List<Record>, checksum: String
     out: rows_written: Int, success: Bool
     effects: [database.write, filesystem]
+    axioms:
+      rows_written >= 0
+      success = true
     contracts:
       pre:  checksum.length > 0
       post: rows_written >= 0

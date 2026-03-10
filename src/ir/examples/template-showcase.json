@@ -19,6 +19,7 @@
           "id": "validate_input",
           "in": { "data": { "type": "$Entity" } },
           "out": { "validated": { "type": "$Entity" } },
+          "axioms": ["output.validated != null"],
           "contract": { "pre": ["input.data != null"], "post": ["output.validated != null"] },
           "effects": [],
           "pure": true
@@ -27,6 +28,7 @@
           "id": "create_entity",
           "in": { "data": { "type": "$Entity" } },
           "out": { "entity": { "type": "$Entity" }, "success": { "type": "Bool" } },
+          "axioms": ["output.success = true"],
           "contract": { "pre": ["input.data != null"], "post": ["output.success == true"] },
           "effects": ["$storage_effect"],
           "recovery": { "storage_failure": { "action": "retry", "params": { "max": 3 } } }
@@ -35,6 +37,7 @@
           "id": "read_entity",
           "in": { "entity_id": { "type": "$IdType" } },
           "out": { "entity": { "type": "$Entity" } },
+          "axioms": ["output.entity != null"],
           "contract": { "pre": ["input.entity_id != null"], "post": ["output.entity != null"] },
           "effects": ["$storage_effect"],
           "recovery": { "not_found": { "action": "respond", "params": { "status": 404 } } }
@@ -59,6 +62,7 @@
           "id": "validate_token",
           "in": { "token": { "type": "$TokenType" } },
           "out": { "claims": { "type": "TokenClaims" }, "valid": { "type": "Bool" } },
+          "axioms": ["output.valid = true"],
           "contract": { "pre": ["input.token != null"], "post": ["output.valid == true"] },
           "effects": ["$auth_effect"],
           "recovery": { "invalid_token": { "action": "respond", "params": { "status": 401 } } }
@@ -67,6 +71,7 @@
           "id": "load_user",
           "in": { "claims": { "type": "TokenClaims" } },
           "out": { "user": { "type": "$UserType" } },
+          "axioms": ["output.user != null"],
           "contract": { "pre": ["input.claims != null"], "post": ["output.user != null"] },
           "effects": ["$auth_effect"],
           "recovery": { "user_not_found": { "action": "respond", "params": { "status": 401 } } }
@@ -75,6 +80,7 @@
           "id": "check_permissions",
           "in": { "user": { "type": "$UserType" } },
           "out": { "authorized_user": { "type": "$UserType" } },
+          "axioms": ["output.authorized_user != null"],
           "contract": { "pre": ["input.user != null"], "post": ["output.authorized_user != null"] },
           "effects": ["$auth_effect"],
           "recovery": { "forbidden": { "action": "respond", "params": { "status": 403 } } }
@@ -128,6 +134,7 @@
         "entity_data": { "type": "String" },
         "route": { "type": "String" }
       },
+      "axioms": ["output.route != null"],
       "contract": {
         "pre": ["input.request != null"],
         "post": ["output.route != null"]
@@ -144,6 +151,7 @@
       "out": {
         "response": { "type": "HTTPResponse" }
       },
+      "axioms": ["output.response != null"],
       "contract": {
         "pre": ["input.status > 0"],
         "post": ["output.response != null"]
