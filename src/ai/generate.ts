@@ -134,16 +134,64 @@ export function cleanAetherResponse(raw: string): string {
 
 export function buildAetherFixPrompt(errors: string[], formattedErrors?: string): string {
   const errorList = errors.map((e, i) => `${i + 1}. ${e}`).join("\n");
-  return `The generated .aether program has parse/validation errors:
+  return `Your .aether code had these parse errors:
 ${formattedErrors || errorList}
 
-Fix them and return only the corrected .aether program. Remember:
-- Every effectful node needs a recovery block
-- Confidence < 0.85 requires break_if checks in contracts
-- Every edge "from" must reference an out port, "to" must reference an in port
-- The graph must be a DAG (no cycles)
-- All nodes need at least one post contract
-- Syntax: graph...end, node...end, edge from.port -> to.port`;
+These errors usually mean you used INVALID syntax. Fix them and return ONLY the corrected .aether program.
+
+CRITICAL RULES — a node body can ONLY contain these sections:
+  in:          — input ports
+  out:         — output ports
+  effects:     — side effect list
+  contracts:   — pre/post/inv conditions
+  recovery:    — error handling rules
+  confidence:  — float 0-1
+  pure         — marks as side-effect-free
+  axioms:      — implementation guarantees
+  adversarial: — break_if checks (NOT inside contracts!)
+  mcp:         — server/tool binding
+  supervised:  — marks as unverified
+
+COMMON MISTAKES TO FIX:
+- break_if MUST be inside an "adversarial:" block, NOT inside "contracts:"
+- Do NOT put imperative code, function calls, loops, or if/else in node bodies
+- Do NOT invent section keywords (no "logic:", "steps:", "body:", "transform:", "do:")
+- Node bodies declare data flow only — inputs, outputs, contracts, effects, recovery
+- Every effectful (non-pure) node MUST have a recovery: block
+- Every node MUST have at least one post: in contracts:
+
+WORKING EXAMPLE for reference:
+graph example v1
+  effects: [gmail.send]
+
+  node compose
+    in:  data: String
+    out: subject: String, body: String
+    contracts:
+      post: subject.length > 0
+      post: body.length > 0
+    pure
+    confidence: 0.99
+  end
+
+  node send
+    in:  to: String, subject: String, body: String
+    out: sent: Bool
+    effects: [gmail.send]
+    mcp:
+      server: gmail
+      tool: send_email
+    contracts:
+      post: sent == true
+    recovery:
+      mcp_timeout -> retry(2, exponential)
+      mcp_error -> escalate("Send failed")
+    confidence: 0.98
+  end
+
+  edge compose.subject -> send.subject
+  edge compose.body -> send.body
+end`;
 }
 
 // ─── Bug Report Classification ───────────────────────────────────────────────
