@@ -178,6 +178,19 @@ export function evaluate(ast: ASTNode, context: EvalContext): EvalResult {
         return fn(...args);
       }
 
+      case "method_call": {
+        const obj = eval_(node.object);
+        const args = node.args.map(a => eval_(a));
+        // Delegate to builtin functions as method(obj, ...args)
+        const fn = context.functions[node.method];
+        if (fn) return fn(obj, ...args);
+        // Fallback to native method on the object
+        if (obj != null && typeof obj[node.method] === "function") {
+          return obj[node.method](...args);
+        }
+        throw new EvalError_(`Unknown method: ${node.method}`);
+      }
+
       case "binary_op": {
         const left = eval_(node.left);
         const right = eval_(node.right);

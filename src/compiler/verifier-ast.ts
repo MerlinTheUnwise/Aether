@@ -223,6 +223,15 @@ function astToZ3(node: ASTNode, tctx: TranslationContext): Z3Expr | null {
       return translateFunctionCall(node, tctx);
     }
 
+    case "method_call": {
+      // Translate obj.method(args) → function_call(obj, ...args)
+      // e.g., html_body.contains("Hello") → contains(html_body, "Hello")
+      return translateFunctionCall(
+        { type: "function_call", name: (node as any).method, args: [(node as any).object, ...(node as any).args] },
+        tctx
+      );
+    }
+
     case "binary_op": {
       const left = astToZ3(node.left, tctx);
       const right = astToZ3(node.right, tctx);

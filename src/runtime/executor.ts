@@ -22,6 +22,8 @@ export { EscalationError, matchesCondition, retryWithBackoff, executeRecovery } 
 import type { ImplementationRegistry } from "../implementations/registry.js";
 import type { ServiceContainer } from "../implementations/services/container.js";
 import type { NodeImplementation, ImplementationContext } from "../implementations/types.js";
+import type { MCPRegistry } from "../mcp/registry.js";
+import type { MCPEffectMapping } from "../mcp/effects.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -45,6 +47,10 @@ export interface ExecutionContext {
   registry?: ImplementationRegistry;
   services?: ServiceContainer;
   contractMode?: "enforce" | "skip" | "warn";
+
+  // MCP support (Phase 1 MCP)
+  mcpRegistry?: MCPRegistry;
+  mcpEffectMappings?: MCPEffectMapping[];
 }
 
 export interface ExecutionLogEntry {
@@ -340,11 +346,47 @@ async function executeNode(
     }
   }
 
-  // 4. Resolve implementation: nodeImplementations → registry → stub
+  // 4. Resolve implementation: nodeImplementations → MCP → registry → stub
   let implFn: ((inputs: Record<string, any>) => Promise<Record<string, any>>) | undefined;
   const legacyImpl = context.nodeImplementations.get(node.id);
   if (legacyImpl) {
     implFn = legacyImpl;
+  } else if (context.mcpRegistry && resolveMCPForNode(node, context)) {
+    // MCP-routed node: call external MCP server
+    const mcpMapping = resolveMCPForNode(node, context)!;
+    const mcpClient = context.mcpRegistry.get(mcpMapping.server);
+    if (mcpClient) {
+      implFn = async (inp) => {
+        // Effect enforcement: verify node declared this server's effects
+        const serverPrefix = mcpMapping.server;
+        if (!node.effects.some(e => e.startsWith(serverPrefix) || e.startsWith(mcpMapping.effect ?? ""))) {
+          throw new Error(`Effect violation: node "${node.id}" called MCP server "${serverPrefix}" but only declared effects: [${node.effects.join(", ")}]`);
+        }
+
+        // Report the effect
+        effectTracker.recordEffect(node.id, mcpMapping.effect ?? `${mcpMapping.server}.${mcpMapping.tool}`);
+        context.onEffectExecuted?.(node.id, mcpMapping.effect ?? `${mcpMapping.server}.${mcpMapping.tool}`, { mcp: true });
+
+        // Merge static params from the mcp block with node inputs
+        const toolParams = mcpMapping.params ? { ...inp, ...mcpMapping.params } : inp;
+
+        const callResult = await mcpClient.callTool(mcpMapping.tool, toolParams);
+        if (!callResult.success) {
+          throw new Error(`mcp_error:${mcpMapping.server}:${callResult.error}`);
+        }
+
+        // Map MCP response to output ports
+        if (typeof callResult.content === "object" && callResult.content !== null && !Array.isArray(callResult.content)) {
+          return callResult.content;
+        }
+        // Single output port: map the content directly
+        const outPorts = Object.keys(node.out);
+        if (outPorts.length === 1) {
+          return { [outPorts[0]]: callResult.content };
+        }
+        return { result: callResult.content };
+      };
+    }
   } else if (context.registry) {
     const resolved = context.registry.resolve(node);
     if (resolved) {
@@ -621,9 +663,15 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
               contractReport.warnings.push(`${node.id}: ${contractCount} contracts SKIPPED (stub mode)`);
             }
           } else {
+            // Seed variables with port names so contracts never hit "Undefined variable"
+            // for declared ports. Actual values from edges/outputs override these defaults.
+            const portDefaults: Record<string, any> = {};
+            for (const portName of Object.keys(node.in)) portDefaults[portName] = undefined;
+            for (const portName of Object.keys(node.out)) portDefaults[portName] = undefined;
+            const contractVars = { ...portDefaults, ...gatherInputs(node, state, context.graph.edges, context.inputs), ...result.outputs };
             for (const expr of [...(node.contract.pre ?? []), ...(node.contract.post ?? []), ...(node.contract.invariants ?? [])]) {
               contractReport.totalChecked++;
-              const check = checkContract(expr, { ...gatherInputs(node, state, context.graph.edges, context.inputs), ...result.outputs });
+              const check = checkContract(expr, contractVars);
               if (check.unevaluable) contractReport.unevaluable++;
               else if (check.passed) contractReport.passed++;
               else contractReport.violated++;
@@ -632,7 +680,7 @@ export async function execute(context: ExecutionContext): Promise<ExecutionResul
             if (node.adversarial_check) {
               for (const expr of node.adversarial_check.break_if) {
                 contractReport.totalChecked++;
-                const check = checkContract(expr, { ...gatherInputs(node, state, context.graph.edges, context.inputs), ...result.outputs });
+                const check = checkContract(expr, contractVars);
                 if (!check.unevaluable && check.passed) contractReport.adversarialTriggered++;
                 else if (check.unevaluable) contractReport.unevaluable++;
                 else contractReport.passed++;
@@ -939,4 +987,54 @@ export async function createExecutionContext(
     services,
     contractMode: options?.contractMode ?? "enforce",
   };
+}
+
+// ─── MCP Resolution ──────────────────────────────────────────────────────────
+
+interface MCPNodeMapping {
+  server: string;
+  tool: string;
+  effect?: string;
+  params?: Record<string, string>;
+}
+
+/**
+ * Resolve MCP routing for a node.
+ * Checks: 1) explicit mcp block on the node, 2) effect-based mapping
+ */
+function resolveMCPForNode(node: AetherNode, context: ExecutionContext): MCPNodeMapping | null {
+  // 1. Explicit mcp block on the node (from IR JSON)
+  const mcpBlock = (node as any).mcp;
+  if (mcpBlock && mcpBlock.server && mcpBlock.tool) {
+    return {
+      server: mcpBlock.server,
+      tool: mcpBlock.tool,
+      params: mcpBlock.params,
+    };
+  }
+
+  // 2. Effect-based mapping
+  if (context.mcpEffectMappings) {
+    for (const effect of node.effects) {
+      const mapping = context.mcpEffectMappings.find(m => m.effect === effect);
+      if (mapping && context.mcpRegistry?.get(mapping.server)) {
+        return { server: mapping.server, tool: mapping.tool, effect: mapping.effect };
+      }
+    }
+  }
+
+  // 3. Convention-based: try "server.tool" pattern from effects
+  if (context.mcpRegistry) {
+    for (const effect of node.effects) {
+      const dotIdx = effect.indexOf(".");
+      if (dotIdx === -1) continue;
+      const server = effect.slice(0, dotIdx);
+      const tool = effect.slice(dotIdx + 1);
+      if (context.mcpRegistry.get(server)) {
+        return { server, tool, effect };
+      }
+    }
+  }
+
+  return null;
 }

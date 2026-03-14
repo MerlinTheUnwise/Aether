@@ -19,6 +19,7 @@ export type ASTNode =
   | { type: "exists"; variable: string; collection: ASTNode; predicate: ASTNode }
   | { type: "array_literal"; elements: ASTNode[] }
   | { type: "function_call"; name: string; args: ASTNode[] }
+  | { type: "method_call"; object: ASTNode; method: string; args: ASTNode[] }
   | { type: "chained_comparison"; comparisons: Array<{ op: string; left: ASTNode; right: ASTNode }> }
   | { type: "empty_set" };
 
@@ -204,13 +205,27 @@ class Parser {
     return this.parsePropertyAccess();
   }
 
-  // Precedence 9: Property access (.)
+  // Precedence 9: Property access (.) and method calls (.method())
   private parsePropertyAccess(): ASTNode {
     let left = this.parsePrimary();
     while (this.peek().type === "DOT") {
       this.advance();
       const propToken = this.expect("IDENTIFIER");
-      left = { type: "property_access", object: left, property: propToken.value };
+      // Check for method call: obj.method(args)
+      if (this.peek().type === "LPAREN") {
+        this.advance(); // consume (
+        const args: ASTNode[] = [];
+        if (this.peek().type !== "RPAREN") {
+          args.push(this.parseImplication());
+          while (this.match("COMMA")) {
+            args.push(this.parseImplication());
+          }
+        }
+        this.expect("RPAREN");
+        left = { type: "method_call" as const, object: left, method: propToken.value, args };
+      } else {
+        left = { type: "property_access", object: left, property: propToken.value };
+      }
     }
     return left;
   }
