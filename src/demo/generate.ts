@@ -4,7 +4,7 @@
  * Generates a self-contained HTML application that demonstrates the full
  * AETHER pipeline: describe → generate → validate → visualize → verify → execute.
  *
- * No backend server required. LLM generation via Anthropic API from the browser.
+ * No backend server required. LLM generation via API from the browser.
  * Validation, visualization, and execution simulation all run in-browser JS.
  */
 
@@ -1043,7 +1043,7 @@ async function generateFromDescription() {
 
   const apiKey = document.getElementById("api-key").value.trim();
   if (!apiKey) {
-    alert("Please enter your Anthropic API key");
+    alert("Please enter your API key");
     return;
   }
 
@@ -1200,7 +1200,7 @@ function demoHTML(css: string, js: string): string {
       <div class="step-title">Describe</div>
     </div>
     <div class="step-content">
-      <div class="api-key-label">Anthropic API Key (for LLM generation — stored only in your browser)</div>
+      <div class="api-key-label">API Key (for LLM generation — stored only in your browser)</div>
       <div class="api-key-row">
         <input type="password" id="api-key" placeholder="sk-ant-..." />
       </div>

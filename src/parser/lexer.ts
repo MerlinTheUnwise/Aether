@@ -12,7 +12,7 @@ export type TokenType =
   | "STATES" | "TRANSITIONS" | "NEVER" | "TERMINAL" | "INITIAL" | "WHEN"
   | "REQUIRES" | "PROVIDES" | "NODES" | "MUST_SATISFY"
   | "AXIOMS" | "PIPELINE_PROPERTIES"
-  | "ADVERSARIAL" | "BREAK_IF"
+  | "ADVERSARIAL" | "BREAK_IF" | "MCP"
   | "PARTIAL" | "METADATA" | "DESCRIPTION" | "SAFETY_LEVEL" | "HUMAN_OVERSIGHT"
   | "SLA" | "LATENCY_MS" | "AVAILABILITY"
   // Operators
@@ -74,6 +74,7 @@ const KEYWORDS: Record<string, TokenType> = {
   pipeline_properties: "PIPELINE_PROPERTIES",
   adversarial: "ADVERSARIAL",
   break_if: "BREAK_IF",
+  mcp: "MCP",
   partial: "PARTIAL",
   metadata: "METADATA",
   description: "DESCRIPTION",

@@ -58,6 +58,13 @@ export interface ASTRecoveryRule {
 
 // --- Node ---
 
+export interface ASTMcp {
+  server: string;
+  tool: string;
+  params?: Record<string, string>;
+  loc: SourceLocation;
+}
+
 export interface ASTNode {
   kind: "node";
   id: string;
@@ -71,6 +78,7 @@ export interface ASTNode {
   axioms?: string[];               // implementation guarantee expressions
   adversarial?: string[];          // break_if expressions
   supervised?: ASTSupervised;
+  mcp?: ASTMcp;                    // MCP server binding
   comments: ASTComment[];
   loc: SourceLocation;
 }

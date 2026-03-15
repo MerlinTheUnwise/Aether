@@ -5,7 +5,7 @@
 Seven sessions addressing every weakness from independent review. Honest documentation, extended verification, real I/O, native compilation, deeper proofs, visual editor, and interactive demo.
 
 ### Session 1: Honest Documentation
-- README, AETHERCLAUDE.md, and all docs rewritten for accuracy
+- README and all docs rewritten for accuracy
 - "AI optimizer" renamed to "static graph optimizer"
 - "JIT" renamed to "runtime code generator"
 - "Proof-carrying" changed to "contract-verified"
@@ -38,7 +38,7 @@ Seven sessions addressing every weakness from independent review. Honest documen
 - In-browser validator (schema, contracts, edges, DAG check, recovery, adversarial)
 - SVG visualization with wave layout, color coding, click-to-inspect
 - Verification simulation and execution simulation (wave scheduling, confidence propagation)
-- LLM generation via Anthropic API (browser-side, auto-fix loop)
+- LLM generation via API (browser-side, auto-fix loop)
 - 4 pre-built examples: user registration, payment processing, content moderation, ETL pipeline
 - CLI: `demo [--output <p>] [--open]`
 - **Tests:** 30 new tests (generate, validation, layout)

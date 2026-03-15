@@ -362,7 +362,7 @@ npx tsx src/cli.ts editor --open  # empty editor
 | `--open` | Open in default browser |
 
 ### `demo [--output <p>] [--open]`
-Generate interactive demo application — describe pipelines in natural language, generate AETHER-IR via Anthropic API, validate, visualize, verify, and simulate execution in-browser.
+Generate interactive demo application — describe pipelines in natural language, generate AETHER-IR via LLM API, validate, visualize, verify, and simulate execution in-browser.
 
 ```
 npx tsx src/cli.ts demo --open

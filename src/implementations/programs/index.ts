@@ -39,7 +39,6 @@ import { fetchCsvDataImpl, validateRecordsImpl, cleanAndNormalizeImpl, detectAno
 import { authenticateUserImpl, checkInventoryApiImpl, processOrderPaymentImpl, createOrderRecordApiImpl, createShipmentApiImpl, sendOrderConfirmationImpl, respondSuccessImpl } from "./api-orchestration.js";
 // Transaction Analysis Pipeline
 import { readTransactionsImpl, readCustomersImpl, readCategoriesImpl, validateTxnRecordsImpl, joinCustomerDataImpl, cleanAndDedupeImpl as cleanAndDedupeTxnImpl, detectTxnAnomaliesImpl, calculateAnalyticsImpl, generateTxnReportImpl, writeCsvOutputImpl, writeReportImpl, writeSummaryImpl } from "./transaction-analysis.js";
-
 // ─── Helper to create RegisteredImplementation ──────────────────────────────────
 
 function reg(id: string, fn: any, opts: Partial<import("../types.js").ImplementationMeta> = {}): RegisteredImplementation {
@@ -192,6 +191,7 @@ export function getProgramImplementations(): RegisteredImplementation[] {
     reg("write_csv_output", writeCsvOutputImpl, { effects: ["filesystem.write"] }),
     reg("write_report", writeReportImpl, { effects: ["filesystem.write"] }),
     reg("write_summary", writeSummaryImpl, { effects: ["filesystem.write"] }),
+
   ];
 }
 

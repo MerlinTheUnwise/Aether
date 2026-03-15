@@ -102,8 +102,8 @@ Commands:
                                    Diff two graph versions as HTML report
   editor [path] [--output <p>] [--open]  Open interactive visual graph editor
   demo [--output <p>] [--open]           Generate interactive demo HTML
-  ai "<description>"                     Generate AETHER-IR from natural language (requires ANTHROPIC_API_KEY)
-  ai-test [--scenarios all|<id>] [--report]  Run bug detection scenarios against Claude
+  ai "<description>"                     Generate AETHER-IR from natural language (requires API key)
+  ai-test [--scenarios all|<id>] [--report]  Run bug detection scenarios against LLM
   run-pipeline <path> [options]              Run real I/O pipeline with filesystem access
                                   --fs-path <path>  Filesystem sandbox base (default: .)
                                   --inputs <json>   Pipeline inputs (paths, output_dir)
@@ -2823,7 +2823,7 @@ if (__isCliMain) {
             const attemptNum = lastAttempt?.attemptNumber ?? 0;
             const maxAttempts = 3;
 
-            console.log(`Generation:    ${lastAttempt?.parseSuccess ? "✓" : "✗"} Claude generated ${nodeCount}-node graph (attempt ${attemptNum}/${maxAttempts})`);
+            console.log(`Generation:    ${lastAttempt?.parseSuccess ? "✓" : "✗"} LLM generated ${nodeCount}-node graph (attempt ${attemptNum}/${maxAttempts})`);
 
             if (result.finalValidation) {
               const v = result.finalValidation;

@@ -325,6 +325,21 @@
         "supervised": {
           "$ref": "#/definitions/SupervisedBlock",
           "description": "Marks this node as explicitly unverified, tracked in verification score"
+        },
+        "mcp": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["server", "tool"],
+          "properties": {
+            "server": { "type": "string", "description": "MCP server name to route this node's execution through" },
+            "tool": { "type": "string", "description": "MCP tool name to invoke on the server" },
+            "params": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "Static parameter overrides or input port name mappings"
+            }
+          },
+          "description": "MCP server binding for this node's effectful execution"
         }
       }
     },

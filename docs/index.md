@@ -1,10 +1,10 @@
 # AETHER Documentation
 
-> Documentation for AI developers building with AETHER and Claude.
+> Documentation for developers building with AETHER.
 
-## For Claude Instances: Start Here
+## Getting Started
 
-If you're a Claude instance being asked to work with AETHER, read these in order:
+Read these documents in order:
 
 1. **[Language Guide](language-guide.md)** — What AETHER is, why it exists, the 9 pillars, 3 execution layers. Read this to understand what you're working with.
 2. **[IR Reference](ir-reference.md)** — The complete AETHER-IR schema. Every entity, field, constraint, and validation rule. This is your primary reference when generating IR.

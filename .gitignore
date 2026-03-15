@@ -16,6 +16,10 @@ rate_limiter.html
 template-showcase.html
 user_registration.html
 
+# Internal/generated directories
+datum-results/
+docs/plans/
+
 # Compiled artifacts
 src/compiler/llvm/runtime/*.obj
 src/compiler/llvm/runtime/*.a

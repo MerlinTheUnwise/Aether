@@ -31,14 +31,12 @@ describe("Naming Consistency", () => {
   const srcFiles = collectFiles(join(projectRoot, "src"), [".ts"]);
   const docFiles = collectFiles(join(projectRoot, "docs"), [".md"]);
   const readmePath = join(projectRoot, "README.md");
-  const claudePath = join(projectRoot, "AETHERCLAUDE.md");
   const designPath = join(projectRoot, "design.md");
 
   const allFiles = [
     ...srcFiles,
     ...docFiles,
     readmePath,
-    claudePath,
     ...(existsSync(designPath) ? [designPath] : []),
   ];
 
@@ -82,11 +80,6 @@ describe("Naming Consistency", () => {
   it("README does not contain 'first language designed'", () => {
     const content = readFileSync(readmePath, "utf-8");
     expect(content).not.toMatch(/first.*language designed/i);
-  });
-
-  it("AETHERCLAUDE.md does not contain 'first programming language'", () => {
-    const content = readFileSync(claudePath, "utf-8");
-    expect(content).not.toContain("first programming language");
   });
 
   it("CLI help text uses 'Static graph' for optimizer, not 'AI-driven'", () => {
@@ -145,8 +138,4 @@ describe("Naming Consistency", () => {
     expect(content).toContain("## Known Limitations");
   });
 
-  it("AETHERCLAUDE.md has Known Limitations section", () => {
-    const content = readFileSync(claudePath, "utf-8");
-    expect(content).toContain("## Known Limitations");
-  });
 });

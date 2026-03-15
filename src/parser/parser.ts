@@ -8,7 +8,7 @@ import type {
   ASTPort, ASTTypeRef, ASTAnnotation, ASTContract, ASTContractClause,
   ASTRecoveryRule, ASTComment, ASTStateTransition,
   ASTBoundaryContract, ASTTemplateParam, ASTTemplateBinding,
-  ASTIntentConstraints, ASTSupervised, ASTMetadata, SourceLocation,
+  ASTIntentConstraints, ASTSupervised, ASTMcp, ASTMetadata, SourceLocation,
 } from "./ast.js";
 import type { ParseError, ParseWarning } from "./errors.js";
 import { makeError } from "./errors.js";
@@ -400,6 +400,13 @@ class Parser {
           this.advance();
           this.match("COLON");
           node.supervised = this.parseSupervisedBlock(tok);
+          break;
+        }
+        case "MCP": {
+          this.advance();
+          this.match("COLON");
+          this.skipNewlines();
+          node.mcp = this.parseMcpBlock(tok);
           break;
         }
         default: {
@@ -1299,6 +1306,82 @@ class Parser {
     return { reason, status, loc: this.loc(tok) };
   }
 
+  private parseMcpBlock(startTok: Token): ASTMcp {
+    const mcp: ASTMcp = { server: "", tool: "", loc: this.loc(startTok) };
+
+    while (true) {
+      this.skipNewlines();
+      const tok = this.peek();
+      if (tok.type === "END" || tok.type === "EOF") break;
+      // PARAMS is a field keyword but valid inside mcp block as "params:" sub-field
+      if (this.isFieldKeyword(tok) && tok.type !== "PARAMS") break;
+
+      if (tok.type === "IDENTIFIER" || tok.type === "MCP" || tok.type === "PARAMS") {
+        const key = tok.value.toLowerCase();
+        if (key === "server") {
+          this.advance();
+          this.match("COLON");
+          const val = this.peek();
+          if (val.type === "STRING" || val.type === "IDENTIFIER") {
+            mcp.server = this.advance().value;
+          }
+        } else if (key === "tool") {
+          this.advance();
+          this.match("COLON");
+          const val = this.peek();
+          if (val.type === "STRING" || val.type === "IDENTIFIER") {
+            mcp.tool = this.advance().value;
+          }
+        } else if (key === "params") {
+          this.advance();
+          this.match("COLON");
+          this.skipNewlines();
+          mcp.params = this.parseMcpParams();
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+
+    return mcp;
+  }
+
+  private parseMcpParams(): Record<string, string> {
+    const params: Record<string, string> = {};
+
+    while (true) {
+      this.skipNewlines();
+      const tok = this.peek();
+      if (tok.type === "END" || tok.type === "EOF" || this.isFieldKeyword(tok)) break;
+      if (tok.type !== "IDENTIFIER") break;
+
+      // Check if this looks like a key: value pair
+      const nextPos = this.pos + 1;
+      const nextTok = this.tokens[nextPos];
+      if (!nextTok || nextTok.type !== "COLON") break;
+
+      const key = this.advance().value;
+      this.match("COLON");
+
+      // Consume value: either a string or collect tokens until newline
+      const valTok = this.peek();
+      if (valTok.type === "STRING") {
+        params[key] = this.advance().value;
+      } else {
+        // Collect remaining tokens on this line as the value
+        let val = "";
+        while (!this.check("NEWLINE") && !this.check("EOF") && !this.check("END")) {
+          val += (val ? " " : "") + this.advance().value;
+        }
+        params[key] = val;
+      }
+    }
+
+    return params;
+  }
+
   private parseTransitionBlock(): ASTStateTransition[] {
     const transitions: ASTStateTransition[] = [];
 
@@ -1559,7 +1642,7 @@ class Parser {
     return tok.type === "IN" || tok.type === "OUT" || tok.type === "EFFECTS" ||
            tok.type === "CONTRACTS" || tok.type === "RECOVERY" || tok.type === "CONFIDENCE" ||
            tok.type === "PURE" || tok.type === "ENSURE" || tok.type === "CONSTRAINTS" ||
-           tok.type === "ADVERSARIAL" || tok.type === "SUPERVISED" ||
+           tok.type === "ADVERSARIAL" || tok.type === "SUPERVISED" || tok.type === "MCP" ||
            tok.type === "STATES" || tok.type === "TRANSITIONS" || tok.type === "NEVER" ||
            tok.type === "TERMINAL" || tok.type === "INITIAL" ||
            tok.type === "NODES" || tok.type === "REQUIRES" || tok.type === "PROVIDES" ||

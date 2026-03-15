@@ -3,7 +3,7 @@
  * count-metrics.ts — Programmatically counts all project metrics.
  * Run: npx tsx scripts/count-metrics.ts
  *
- * These are the authoritative numbers for README.md and AETHERCLAUDE.md.
+ * These are the authoritative numbers for README.md.
  */
 
 import { readdirSync, readFileSync, statSync, existsSync } from "fs";

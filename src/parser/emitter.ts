@@ -161,6 +161,18 @@ function emitNode(node: ASTNode, lines: string[], indent: string) {
     lines.push(`${indent}  supervised: "${sup.reason}" ${sup.status}`);
   }
 
+  if (node.mcp) {
+    lines.push(`${indent}  mcp:`);
+    lines.push(`${indent}    server: ${node.mcp.server}`);
+    lines.push(`${indent}    tool: ${node.mcp.tool}`);
+    if (node.mcp.params && Object.keys(node.mcp.params).length > 0) {
+      lines.push(`${indent}    params:`);
+      for (const [k, v] of Object.entries(node.mcp.params)) {
+        lines.push(`${indent}      ${k}: "${v}"`);
+      }
+    }
+  }
+
   if (node.pure) {
     lines.push(`${indent}  pure`);
   }

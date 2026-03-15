@@ -162,6 +162,16 @@ function astNodeToIR(node: ASTNode): AetherNode {
     };
   }
 
+  if (node.mcp) {
+    (irNode as any).mcp = {
+      server: node.mcp.server,
+      tool: node.mcp.tool,
+    };
+    if (node.mcp.params && Object.keys(node.mcp.params).length > 0) {
+      (irNode as any).mcp.params = node.mcp.params;
+    }
+  }
+
   return irNode;
 }
 
@@ -521,6 +531,16 @@ function irNodeToAST(node: AetherNode): ASTNode {
     astNode.supervised = {
       reason: node.supervised.reason,
       status: node.supervised.review_status ?? "pending",
+      loc,
+    };
+  }
+
+  if ((node as any).mcp) {
+    const m = (node as any).mcp;
+    astNode.mcp = {
+      server: m.server,
+      tool: m.tool,
+      params: m.params,
       loc,
     };
   }

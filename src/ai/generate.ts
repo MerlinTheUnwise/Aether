@@ -1,6 +1,6 @@
 /**
  * AETHER AI Generation Pipeline
- * Generates AETHER-IR from natural language descriptions using Claude,
+ * Generates AETHER-IR from natural language descriptions using an LLM,
  * then validates, type-checks, and verifies the output.
  * Each validation failure becomes a BugReport — proof that AETHER's
  * verification pipeline catches bugs plain code generation would miss.
@@ -373,7 +373,7 @@ Fix them and return only the corrected JSON. Remember:
 
 // ─── API Call ────────────────────────────────────────────────────────────────
 
-export async function callClaude(
+export async function callLLM(
   systemPrompt: string,
   userMessage: string,
   model: string,
@@ -396,13 +396,13 @@ export async function callClaude(
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`Claude API error (${response.status}): ${body}`);
+    throw new Error(`LLM API error (${response.status}): ${body}`);
   }
 
   const data = await response.json() as { content: Array<{ type: string; text?: string }> };
   const textBlock = data.content.find(b => b.type === "text");
   if (!textBlock?.text) {
-    throw new Error("No text response from Claude API");
+    throw new Error("No text response from LLM API");
   }
   return textBlock.text;
 }
@@ -435,7 +435,7 @@ export async function generateFromDescription(request: GenerationRequest): Promi
   let currentMessage = request.description;
 
   for (let attemptNum = 1; attemptNum <= maxAttempts; attemptNum++) {
-    const raw = await callClaude(systemPrompt, currentMessage, model, apiKey);
+    const raw = await callLLM(systemPrompt, currentMessage, model, apiKey);
     const attempt: GenerationAttempt = {
       attemptNumber: attemptNum,
       raw_json: raw,
